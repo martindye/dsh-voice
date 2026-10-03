@@ -1,0 +1,55 @@
+{
+  "name": "@martin/dsh-voice",
+  "version": "1.0.0",
+  "description": "Martin's two-way voice for the DSH web app: the unified voice composer with continuous listening, spoken pause and in-call mute. Forked from @deepseek-ai/dsh-experimental-client-ui-voice-input 0.1.7-rc.2 and maintained here as a standalone plugin.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json",
+    "./client": {
+      "default": "./lib/client.js"
+    }
+  },
+  "files": [
+    "src",
+    "lib",
+    "README.md"
+  ],
+  "scripts": {
+    "bundle": "tsdown",
+    "test": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@deepseek-ai/dsh-experimental-api-speech-to-text": "link:../../deepseek-harness/packages/experimental/api-speech-to-text",
+    "lightningcss": "^1.32.0",
+    "tsdown": "^0.22.2"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ],
+      "platform": "web",
+      "external": [
+        "@deepseek-ai/dsh-api-gateway/client"
+      ]
+    }
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  }
+}
