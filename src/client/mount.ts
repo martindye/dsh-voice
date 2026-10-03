@@ -31,6 +31,11 @@ const NATIVE_SEND_HIDE_RULES = [
   'button[aria-label="Stop generating"]:not([data-voice-unified])',
 ]
 
+/** The app's own stop button: hidden by the rule above, still wired to the host's stop path. */
+const NATIVE_STOP_SELECTORS = [
+  'button[aria-label="Stop generating"]:not([data-voice-unified])',
+]
+
 function retireNativeSendButton(): void {
   try {
     if (typeof document === 'undefined' || document.getElementById('dsh-voice-unified-hide')) return
@@ -51,9 +56,19 @@ function registerUi(ctx: Context): void {
   const actions: VoiceInputInjected = {
     openSettings: () => { ctx.pluginNavigation.openBundle('@deepseek-ai/dsh-experimental-voice-input-bundle') },
     stopTurn: (sessionId: SessionId) => {
-      const scoped = ctx.sessions.scope(sessionId)
-      const conversation = scoped?.get('conversation') as { cancel?: () => Promise<unknown> } | undefined
-      void conversation?.cancel?.().catch(() => { /* a failed stop surfaces through the session prompt line */ })
+      // Preferred: the app's own stop button. It stays in the DOM while a
+      // turn runs (the unified-button CSS only hides it) and is wired to the
+      // host's stop path, so clicking it stops the turn exactly as the
+      // native UI would.
+      const native = document.querySelector<HTMLButtonElement>(NATIVE_STOP_SELECTORS.join(', '))
+      if (native) { native.click(); return }
+      // No native button in the DOM (non-English label, or a moment it is
+      // not rendered): cancel through the session-scoped Conversation.
+      try {
+        const scoped = ctx.sessions?.scope?.(sessionId)
+        const conversation = scoped?.get?.('conversation') as { cancel?: () => Promise<unknown> } | undefined
+        void conversation?.cancel?.().catch(() => { /* a failed stop surfaces through the session prompt line */ })
+      } catch { /* nothing reachable: the stop cannot complete */ }
     },
     hooks: { speechReadiness: readiness.state },
     createRecording: () => {
@@ -90,7 +105,7 @@ function registerUi(ctx: Context): void {
  */
 export async function mountVoiceInput(ctx: Context, contribution: TypertRemoteContribution): Promise<() => Promise<void>> {
   const disposeRemote = await ctx.remote.$mount(contribution)
-  const ui = ctx.inject(['remote.speech', 'slots', 'locale', 'pluginNavigation'], registerUi)
+  const ui = ctx.inject(['remote.speech', 'sessions', 'slots', 'locale', 'pluginNavigation'], registerUi)
   try { await ui } catch (error) { await ui.dispose(); await disposeRemote(); throw error }
   return async () => { await ui.dispose(); await disposeRemote() }
 }
