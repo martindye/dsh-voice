@@ -6,6 +6,13 @@ export class RecordingError extends Error {
 }
 
 /**
+ * Audio older than this is never transcribed: a suspended or backgrounded
+ * page can flush a backlog of long-captured microphone audio on resume, and
+ * nobody wants to send words an hour old. The buffer is cleaned as it ages.
+ */
+const FRESH_WINDOW_MS = 5 * 60 * 1000
+
+/**
  * Encode mono floating-point samples as the canonical PCM16 WAV accepted by the Host.
  * @param samples - native-resampled 16 kHz mono samples.
  * @returns complete little-endian WAV bytes.
@@ -44,7 +51,7 @@ export class Recording {
   private context: AudioContext | undefined
   private analyser: AnalyserNode | undefined
   private samples = new Float32Array(256)
-  private chunks: Blob[] = []
+  private chunks: { blob: Blob; at: number }[] = []
   private muted = false
   private readonly lifetime = new AbortController()
   private disposal: Promise<void> | undefined
@@ -81,7 +88,12 @@ export class Recording {
       this.context.createMediaStreamSource(stream).connect(this.analyser)
       this.recorder = new MediaRecorder(stream)
       this.recorder.ondataavailable = (event) => {
-        if (!this.lifetime.signal.aborted && !this.muted && event.data.size > 0) this.chunks.push(event.data)
+        if (this.lifetime.signal.aborted || this.muted || event.data.size === 0) return
+        const now = Date.now()
+        this.chunks.push({ blob: event.data, at: now })
+        // Age the buffer: anything that has sat here past the freshness
+        // window is never transcribed, so it leaves the buffer as it ages.
+        while (this.chunks.length > 0 && now - this.chunks[0].at >= FRESH_WINDOW_MS) this.chunks.shift()
       }
       this.recorder.onerror = () => {
         if (this.lifetime.signal.aborted) return
@@ -107,7 +119,10 @@ export class Recording {
   }
 
   /**
-   * Finish capture and resample the recording.
+   * Finish capture and resample the recording. Only the freshest tail is
+   * kept: a suspended page can flush a backlog of long-captured audio on
+   * resume, and words older than the freshness window must never reach the
+   * recognizer.
    * @param maxDurationSeconds - truncate timer overshoot to the Host limit.
    * @returns one recording after the final MediaRecorder chunk arrives.
    */
@@ -123,15 +138,20 @@ export class Recording {
       })
       this.stream?.getTracks().forEach((track) => { track.stop() })
       this.lifetime.signal.throwIfAborted()
-      const blob = new Blob(this.chunks, { type: recorder.mimeType })
+      const blob = new Blob(this.chunks.map((chunk) => chunk.blob), { type: recorder.mimeType })
       if (blob.size === 0) throw new RecordingError('empty')
       const decoded = await context.decodeAudioData(await blob.arrayBuffer())
       this.lifetime.signal.throwIfAborted()
-      const offline = new OfflineAudioContext(1, Math.max(1, Math.floor(Math.min(decoded.duration, maxDurationSeconds) * 16000)), 16000)
+      // Keep the newest tail, bounded by the Host limit and the freshness
+      // window; anything older (a suspended-tab backlog, a long-open mic)
+      // is dropped instead of being sent for transcription.
+      const keepSeconds = Math.min(decoded.duration, Math.min(maxDurationSeconds, FRESH_WINDOW_MS / 1000))
+      const offsetSeconds = decoded.duration - keepSeconds
+      const offline = new OfflineAudioContext(1, Math.max(1, Math.floor(keepSeconds * 16000)), 16000)
       const source = offline.createBufferSource()
       source.buffer = decoded
       source.connect(offline.destination)
-      source.start()
+      source.start(0, offsetSeconds)
       const resampled = await offline.startRendering()
       this.lifetime.signal.throwIfAborted()
       return encodeWave(resampled.getChannelData(0))

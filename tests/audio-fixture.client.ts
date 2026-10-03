@@ -11,7 +11,9 @@ export function captureFixture(options: { empty?: boolean; recorderError?: boole
   const trackStop = vi.fn(), close = vi.fn(async () => {}), disposed = vi.fn()
   const decoding = vi.fn(async (_data: ArrayBuffer) => ({ duration: 2 }))
   const rendering = vi.fn(async () => ({ getChannelData: () => new Float32Array([0.5, -0.5]) }))
+  const sourceStart = vi.fn()
   let failRecorder: () => void
+  let mediaRecorder: Recorder | undefined
   class Recorder {
     state = 'inactive'
     mimeType = 'audio/webm'
@@ -20,6 +22,7 @@ export function captureFixture(options: { empty?: boolean; recorderError?: boole
     onerror?: () => void
     constructor() {
       if (options.constructError) throw new Error('recorder unavailable')
+      mediaRecorder = this
       failRecorder = () => { this.onerror!() }
     }
     start() { this.state = 'recording' }
@@ -34,7 +37,7 @@ export function captureFixture(options: { empty?: boolean; recorderError?: boole
     }
   }
   const offline = vi.fn(function Offline(_channels: number, _frames: number, _rate: number) {
-    return { destination: {}, createBufferSource: () => ({ buffer: null, connect() {}, start() {} }), startRendering: rendering }
+    return { destination: {}, createBufferSource: () => ({ buffer: null, connect() {}, start: sourceStart }), startRendering: rendering }
   })
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: trackStop }] }) } })
   vi.stubGlobal('MediaRecorder', Recorder)
@@ -44,5 +47,6 @@ export function captureFixture(options: { empty?: boolean; recorderError?: boole
   } })
   vi.stubGlobal('OfflineAudioContext', offline)
   return { recording: new Recording(disposed), trackStop, close, disposed, decoding, rendering, offline,
+    sourceStart, mediaRecorder: () => mediaRecorder,
     failRecorder: () => { failRecorder() } }
 }

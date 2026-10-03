@@ -58,6 +58,32 @@ it('flushes final recording bytes, bounds timer overshoot and closes audio resou
   expect(b.close).toHaveBeenCalledOnce()
 })
 
+it('transcribes only the freshest tail of a long backlog, never the oldest', async () => {
+  const b = captureFixture()
+  b.decoding.mockReturnValueOnce(Promise.resolve({ duration: 400 }))
+  await b.recording.start()
+  await b.recording.stop(30)
+  expect(b.offline).toHaveBeenCalledWith(1, 480000, 16000) // 30 s tail at 16 kHz
+  expect(b.sourceStart).toHaveBeenCalledWith(0, 370)       // rendered from the buffer end
+  await b.recording.dispose()
+})
+
+it('ages audio out of the buffer after the freshness window', async () => {
+  const b = captureFixture()
+  await b.recording.start()
+  const recorder = b.mediaRecorder()!
+  vi.useFakeTimers()
+  try {
+    recorder.ondataavailable?.({ data: new Blob(['stale']) })
+    vi.advanceTimersByTime(6 * 60 * 1000)
+    recorder.ondataavailable?.({ data: new Blob(['fresh']) })
+    await b.recording.stop(30)
+    const fed = new TextDecoder().decode(new Uint8Array(b.decoding.mock.calls.at(-1)![0] as ArrayBuffer))
+    expect(fed).toBe('freshfinal audio') // the aged chunk never reached the decoder
+  } finally { vi.useRealTimers() }
+  await b.recording.dispose()
+})
+
 it.each([{ empty: true }, { recorderError: true }, { constructError: true }])('releases failed capture resources: %j', async (options) => {
   const b = captureFixture(options)
   if (options.constructError) await expect(b.recording.start()).rejects.toThrow('recorder unavailable')
