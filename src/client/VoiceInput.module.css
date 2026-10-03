@@ -1,4 +1,6 @@
-.trigger { width: 28px; padding: 0; flex: none; }
+/* Dictate microphone: a 34px circle, level with the voice button it sits
+   beside (2026-10-03: 28px read as small next to the 34px voice circle). */
+.trigger:is(.trigger) { width: 34px; height: 34px; padding: 0; border-radius: 999px; corner-shape: round; display: grid; place-items: center; flex: none; }
 /* Voice chat toggle: matches the primary send circle (figma 34:10465) — 34px,
    info-fill blue, white glyph — filled when on, outlined when off.
    Double-class specificity keeps the 34px circle from losing to the base

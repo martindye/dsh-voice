@@ -463,7 +463,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
       <span className={css.triggerAnchor}><Button className={css.trigger} size="sm" disabled={locked}
         aria-label={t(usable ? 'start' : 'setupPrompt.trigger')} aria-haspopup={usable ? undefined : 'dialog'}
         onMouseDown={(event) => { event.preventDefault() }}
-        onClick={() => { if (usable) void start(); else setSetupOpen(true) }}><IconMicrophoneOutlineRegular size={18} /></Button></span>
+        onClick={() => { if (usable) void start(); else setSetupOpen(true) }}><IconMicrophoneOutlineRegular size={20} /></Button></span>
     </Tooltip>
     <Tooltip label={label} side="top" portal>
       <span className={css.triggerAnchor}><Button type="button" data-voice-unified="1" className={`${css.voiceChat} ${css.voiceChatOn}`} size="sm"
