@@ -133,12 +133,14 @@ function CloseGlyph() {
   )
 }
 
-/** The dictate microphone with a strike-through: the in-call mute / unmute. */
+/** The dictate microphone with a strike-through: the in-call mute / unmute.
+ *  Sized to match the 20px dictate microphone it replaces, so the mute
+ *  button does not read as smaller mid-call. */
 function MicMutedGlyph() {
   return (
     <span className={css.muteGlyph}>
-      <IconMicrophoneOutlineRegular size={16} />
-      <svg viewBox="0 0 16 16" width={16} height={16} fill="none" aria-hidden>
+      <IconMicrophoneOutlineRegular size={20} />
+      <svg viewBox="0 0 16 16" width={20} height={20} fill="none" aria-hidden>
         <path d="M2.8 2.4l10.4 11.2" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
       </svg>
     </span>
