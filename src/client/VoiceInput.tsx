@@ -95,6 +95,9 @@ const LISTEN_SETTLE_MS = 3000
  *  re-offered up to this many times in a row, so a pause between messages
  *  does not kill the back-and-forth; then it rests until the next reply. */
 const MAX_EMPTY_LISTENS = 4
+/** A sent turn that never reports `running` (dropped, or still walking the
+ *  submit pipeline) releases the stop square after this long. */
+const PENDING_TURN_EXPIRY_MS = 120_000
 /** Spoken commands that park the microphone: a program on a speaker in the
  *  room would otherwise be transcribed and sent as the user's own words. */
 const PAUSE_LISTENING = /(?:hold|pause)\s+(?:the\s+)?mic(?:rophone)?\b|\bstop listening\b/i
@@ -221,13 +224,33 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   const [armed, setArmed] = useState(false)
   const turnEndedAt = useRef<number>(), sawSpeech = useRef(false), prevRunning = useRef(running)
   const emptyListens = useRef(0)
+  // A sent message whose turn the session has not reported as running yet
+  // (still in the submit pipeline, or the status event lags): while it is in
+  // flight the button keeps the stop square instead of falling back to the
+  // dictate/waveform affordance, which read as "voice chat mode is lost".
+  const turnInFlight = useRef(false), turnInFlightAt = useRef(0)
+  const [, bumpPending] = useState(0)
   // A spoken "hold the mic" parks the loop until a deliberate tap.
   const paused = useRef(false)
   useEffect(() => {
     if (prevRunning.current && running === false) {
       turnEndedAt.current = Date.now(); sawSpeech.current = false; emptyListens.current = 0
+      turnInFlight.current = false
     }
     prevRunning.current = running
+  }, [running])
+  // A submitted turn that never reports running (dropped, or stuck in the
+  // submit pipeline) must not pin the stop square: release it and seed the
+  // end mark so an armed microphone can still revive the conversation.
+  useEffect(() => {
+    const iv = window.setInterval(() => {
+      if (turnInFlight.current && running === false && Date.now() - turnInFlightAt.current >= PENDING_TURN_EXPIRY_MS) {
+        turnInFlight.current = false
+        turnEndedAt.current = Date.now()
+        bumpPending(n => n + 1)
+      }
+    }, 1000)
+    return () => window.clearInterval(iv)
   }, [running])
   useEffect(() => {
     if (speaking && turnEndedAt.current !== undefined) sawSpeech.current = true
@@ -247,6 +270,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   useEffect(() => {
     setMessage(''); setPhase('idle'); setSetupOpen(false)
     setArmed(false); turnEndedAt.current = undefined; sawSpeech.current = false
+    turnInFlight.current = false
     emptyListens.current = 0; paused.current = false
     // Leaving (blur, hidden tab, Escape) ends the listening loop: the user
     // took the microphone away, so it does not reopen on its own.
@@ -283,6 +307,11 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     const capture = current.current?.capture
     if (capture) capture.setMuted(next)
   }
+  /** Mark a just-submitted message as a turn in flight, for the button. */
+  const beginTurn = (): void => {
+    turnInFlight.current = true
+    turnInFlightAt.current = Date.now()
+  }
   const finish = async (): Promise<void> => {
     const active = current.current
     if (!active || active.phase !== 'recording') return
@@ -316,7 +345,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
         feedback(t('listeningPaused'))
         return
       }
-      inputActions.setDraft(result.value.text); inputActions.submit(); current.current = undefined; setPhase('idle')
+      inputActions.setDraft(result.value.text); beginTurn(); inputActions.submit(); current.current = undefined; setPhase('idle')
       setArmed(true)
     } catch (failure) {
       if (failure instanceof RecordingError && failure.kind === 'empty' && run === generation.current) {
@@ -449,9 +478,12 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     <Button type="button" className={css.roundButton} size="sm" aria-label={t('retryRecording')} disabled={!usable || locked}
       onClick={() => { void start() }}><IconMicrophoneOutlineRegular size={18} /></Button>
   </div>
-  // Stop square while the agent thinks OR the system speaks (empty draft);
-  // typing any text reverts to the send arrow so a reply can be sent either way.
-  const busyTurn = running === true && stop !== undefined
+  // Stop square while a turn is in flight — the session reports it running, OR
+  // this plugin sent a message that has not reported running yet — or the
+  // system speaks (empty draft); typing any text reverts to the send arrow so
+  // a reply can be sent either way.
+  const pendingTurn = turnInFlight.current && running !== true
+  const busyTurn = (running === true && stop !== undefined) || pendingTurn
   const stopMode = !locked && empty === true && (busyTurn || speaking)
   // With an empty draft the button is the voice-chat entry (waveform); typing
   // any text switches it to the send arrow.
@@ -471,9 +503,16 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
         disabled={stopMode ? false : voiceMode ? locked || !usable : sendDisabled}
         onMouseDown={(event) => { event.preventDefault() }}
         onClick={() => {
-          if (stopMode) { if (busyTurn) stop?.(); if (speaking) stopSpeaking(); return }
+          if (stopMode) {
+            // pendingTurn: the turn is in the pipeline, not the session's
+            // `running` flag yet — the stop path still reaches it (native stop
+            // button if rendered, else the session-scoped cancel).
+            if (busyTurn) { if (running === true) stop?.(); else stopTurn(sessionId) }
+            if (speaking) stopSpeaking()
+            return
+          }
           if (voiceMode) { if (usable) void start(); else setSetupOpen(true); return }
-          if (!sendDisabled) inputActions.submit()
+          if (!sendDisabled) { beginTurn(); inputActions.submit() }
         }}>
         {stopMode ? <StopSquareGlyph /> : voiceMode ? <VoiceChatGlyph /> : <SendArrowGlyph />}</Button></span>
     </Tooltip>
