@@ -9,6 +9,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import { VoiceInput, type VoiceInputInjected } from './VoiceInput.tsx'
+import { setMetricsSink } from './metrics.ts'
 import { Recording } from './audio.ts'
 import { en, NS, zh } from './locales.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
@@ -17,6 +18,32 @@ import { VoicePreparation } from './PreparationCard.tsx'
 import { VoiceSetupPrompt } from './VoiceSetupPrompt.tsx'
 
 export const inject = ['remote', 'slots', 'locale', 'pluginNavigation']
+
+/** Pass-through codec (the bundle has no zod): the runtime only needs the shape. */
+function passThroughCodec(typeSymbol: string): unknown {
+  return {
+    mode: 'strict',
+    typeSymbol,
+    create: () => ({
+      parse: (value: unknown) => value,
+      safeParse: (value: unknown) => ({ success: true, data: value }),
+    }),
+  }
+}
+
+/** The plugin's own tiny Remote: one voice-turn latency line to the host log. */
+const METRICS_REMOTE = {
+  package: '@martin/dsh-voice',
+  descriptors: [{
+    id: '@martin/dsh-voice#voiceMetrics/log',
+    service: 'voiceMetricsController',
+    namespace: 'voiceMetrics',
+    method: 'log',
+    invocation: { kind: 'direct' },
+    parameters: [{ name: 'entry', wire: 'entry', source: 'json', codec: passThroughCodec('@martin/dsh-voice#MetricEntry') }],
+    result: passThroughCodec('@martin/dsh-voice#MetricResult'),
+  }],
+} as const
 
 /**
  * The unified activity-slot button takes over the composer's send/stop control,
@@ -105,7 +132,14 @@ function registerUi(ctx: Context): void {
  */
 export async function mountVoiceInput(ctx: Context, contribution: TypertRemoteContribution): Promise<() => Promise<void>> {
   const disposeRemote = await ctx.remote.$mount(contribution)
+  const disposeMetrics = await ctx.remote.$mount(METRICS_REMOTE as unknown as TypertRemoteContribution)
+  setMetricsSink((entry) => {
+    try {
+      const ns = (ctx.remote as unknown as { voiceMetrics?: { log?: (entry: Record<string, unknown>) => unknown } }).voiceMetrics
+      void Promise.resolve(ns?.log?.(entry)).catch(() => { /* metrics never break the voice path */ })
+    } catch { /* ditto */ }
+  })
   const ui = ctx.inject(['remote.speech', 'sessions', 'slots', 'locale', 'pluginNavigation'], registerUi)
-  try { await ui } catch (error) { await ui.dispose(); await disposeRemote(); throw error }
-  return async () => { await ui.dispose(); await disposeRemote() }
+  try { await ui } catch (error) { await ui.dispose(); await disposeRemote(); await disposeMetrics(); throw error }
+  return async () => { await ui.dispose(); await disposeRemote(); await disposeMetrics() }
 }

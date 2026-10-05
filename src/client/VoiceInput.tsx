@@ -7,6 +7,7 @@ import type { TranscriptionRequest } from '@deepseek-ai/dsh-experimental-api-spe
 import type { SpeechPreparationOptions, SpeechProviderId, SpeechSelection, SpeechSelectionPatch, Transcript } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { RecordingError, audioBase64, type Recording } from './audio.ts'
+import { runningChanged, speechStarted, voiceEnded } from './metrics.ts'
 import type { SpeechReadiness } from './readiness.ts'
 import { VoiceSetupDialog } from './VoiceSetupDialog.tsx'
 import { NS } from './locales.ts'
@@ -239,6 +240,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   // pause never lingers into the next turn.
   const focusPaused = useRef(false)
   useEffect(() => {
+    runningChanged(running)
     if (prevRunning.current && running === false) {
       turnEndedAt.current = Date.now(); sawSpeech.current = false; emptyListens.current = 0
       turnInFlight.current = false
@@ -259,7 +261,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     return () => window.clearInterval(iv)
   }, [running])
   useEffect(() => {
-    if (speaking && turnEndedAt.current !== undefined) sawSpeech.current = true
+    if (speaking) { speechStarted(); if (turnEndedAt.current !== undefined) sawSpeech.current = true }
   }, [speaking])
   // Only the feedback row claims the whole toolbar width; a live turn keeps the
   // composer intact and just swaps the button for the cross.
@@ -344,6 +346,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   const finish = async (): Promise<void> => {
     const active = current.current
     if (!active || active.phase !== 'recording') return
+    voiceEnded() // the user's words are final: the latency clock starts here
     active.phase = 'transcribing'
     const run = generation.current
     clearTimeout(active.timer); setPhase('transcribing')

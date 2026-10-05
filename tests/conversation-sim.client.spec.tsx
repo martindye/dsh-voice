@@ -25,6 +25,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Transcript } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { VoiceInput, type VoiceInputProps } from '../src/client/VoiceInput.tsx'
+import { setMetricsSink } from '../src/client/metrics.ts'
 import { Recording } from '../src/client/audio.ts'
 
 /**
@@ -80,6 +81,10 @@ function note(container: HTMLElement, event: string): void {
 
 /** Record a transition whenever the visible primary/mute pair changes. */
 let lastKey = ''
+
+/** Metric lines shipped by the plugin this test (one per completed voice turn). */
+const metricLines: Record<string, unknown>[] = []
+
 function watch(container: HTMLElement, label: string): void {
   const view = probe(container)
   const key = `${view.unified}|${view.mute}`
@@ -228,6 +233,8 @@ async function startTurn(s: Sim): Promise<void> {
 beforeEach(() => {
   trace.length = 0
   lastKey = ''
+  metricLines.length = 0
+  setMetricsSink((entry) => { metricLines.push(entry) })
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
 })
@@ -275,6 +282,15 @@ it('converses two turns with no focus events: the rhythm is clean', async () => 
   // The microphone went live exactly twice: once per turn. Any extra session
   // would mean the live recording was killed and reopened mid-conversation.
   expect(recordingSessions()).toBe(2)
+
+  // Every completed voice turn ships a latency line (end of his words ->
+  // agent start, agent think time) that the host appends to its log.
+  expect(metricLines.length).toBeGreaterThanOrEqual(1)
+  for (const line of metricLines) {
+    expect(line).toMatchObject({ toAgentMs: expect.any(Number), thinkMs: expect.any(Number) })
+    expect((line as { toAgentMs: number }).toAgentMs).toBeGreaterThanOrEqual(0)
+    expect((line as { thinkMs: number }).thinkMs).toBeGreaterThanOrEqual(0)
+  }
 }, 60000)
 
 it('keeps a live recording through a window blur (I2)', async () => {
