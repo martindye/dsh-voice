@@ -234,6 +234,10 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   const [, bumpPending] = useState(0)
   // A spoken "hold the mic" parks the loop until a deliberate tap.
   const paused = useRef(false)
+  // Focus loss (a notification, screen lock, app switch) pauses a live
+  // recording instead of killing it; cleared on every cancel so a stale
+  // pause never lingers into the next turn.
+  const focusPaused = useRef(false)
   useEffect(() => {
     if (prevRunning.current && running === false) {
       turnEndedAt.current = Date.now(); sawSpeech.current = false; emptyListens.current = 0
@@ -264,6 +268,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
 
   const cancel = (): void => {
     generation.current++
+    focusPaused.current = false
     const active = current.current
     current.current = undefined
     if (active) { clearTimeout(active.timer); active.abort.abort(); void disposeRecording(active.capture) }
@@ -273,21 +278,43 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     setMessage(''); setPhase('idle'); setSetupOpen(false)
     setArmed(false); turnEndedAt.current = undefined; sawSpeech.current = false
     turnInFlight.current = false
-    emptyListens.current = 0; paused.current = false
-    // Leaving (blur, hidden tab, Escape) ends the listening loop: the user
-    // took the microphone away, so it does not reopen on its own.
+    emptyListens.current = 0; paused.current = false; focusPaused.current = false
+    // Focus loss (a notification, screen lock, app switch) pauses a live
+    // recording instead of ending it: on a phone the window blurs all the
+    // time, and a killed turn flickered the mute button back to the dictate
+    // mic and dropped the user's words. Pausing mutes the capture (audio
+    // discarded, VAD clocks frozen); focus resumes it where it left off.
     const quit = (): void => { cancel(); turnEndedAt.current = undefined }
-    const blur = (): void => { if (current.current?.phase === 'recording') quit() }
+    const pauseForFocus = (): void => {
+      const active = current.current
+      if (!active || active.phase !== 'recording' || focusPaused.current) return
+      focusPaused.current = true
+      active.capture.setMuted(true)
+    }
+    const resumeFromFocus = (): void => {
+      if (!focusPaused.current) return
+      focusPaused.current = false
+      const active = current.current
+      if (active && active.phase === 'recording') {
+        active.capture.setMuted(mutedRef.current)
+        active.vadStart = undefined; active.vadHeardAt = undefined; active.vadLastVoice = undefined
+      }
+    }
+    const blur = (): void => { pauseForFocus() }
+    const focus = (): void => { resumeFromFocus() }
     const visibility = (): void => {
-      if (document.hidden && current.current && current.current.phase !== 'transcribing') quit()
+      if (document.hidden) pauseForFocus()
+      else resumeFromFocus()
     }
     const escape = (event: KeyboardEvent): void => {
       if (event.key === 'Escape' && current.current) { event.preventDefault(); quit() }
     }
-    window.addEventListener('blur', blur); document.addEventListener('visibilitychange', visibility)
+    window.addEventListener('blur', blur); window.addEventListener('focus', focus)
+    document.addEventListener('visibilitychange', visibility)
     document.addEventListener('keydown', escape)
     return () => {
-      window.removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility)
+      window.removeEventListener('blur', blur); window.removeEventListener('focus', focus)
+      document.removeEventListener('visibilitychange', visibility)
       document.removeEventListener('keydown', escape)
       generation.current++
       const active = current.current
@@ -401,6 +428,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
       const active = current.current
       if (!active || active.phase !== 'recording') return
       if (mutedRef.current) return // muted: the silence is deliberate, freeze the clocks
+      if (focusPaused.current) return // focus lost: the window is away, freeze the clocks
       const now = Date.now()
       if (active.vadStart === undefined) active.vadStart = now
       if (active.capture.amplitude() >= VOICE_RMS) {

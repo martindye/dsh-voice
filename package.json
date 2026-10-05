@@ -26,11 +26,19 @@
     "bundle": "tsdown",
     "test": "vitest run"
   },
-  "dependencies": {},
   "devDependencies": {
+    "@deepseek-ai/dsh-client-ui-primitives": "0.0.1-rc.1",
     "@deepseek-ai/dsh-experimental-api-speech-to-text": "link:../../deepseek-harness/packages/experimental/api-speech-to-text",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "jsdom": "^30.1.2",
     "lightningcss": "^1.32.0",
-    "tsdown": "^0.22.2"
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "tsdown": "^0.22.2",
+    "vitest": "^4.1.11"
   },
   "dsh": {
     "bundle": {

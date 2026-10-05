@@ -71,19 +71,40 @@ it('starts a voice turn, stops it, and submits the transcript as a message', asy
   expect(screen.queryByRole('dialog')).toBeNull()
 })
 
-it.each(['escape', 'blur', 'hidden'])('releases a recording without transcription on %s', async (how) => {
+it('releases a recording without transcription on escape', async () => {
   const b = fixture()
   await start()
-  if (how === 'escape') fireEvent.keyDown(document, { key: 'Escape' })
-  if (how === 'blur') fireEvent.blur(window)
-  if (how === 'hidden') {
-    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
-    try { fireEvent(document, new Event('visibilitychange')) } finally { delete (document as { hidden?: boolean }).hidden }
-  }
+  fireEvent.keyDown(document, { key: 'Escape' })
   await screen.findByRole('button', { name: zh.start })
   expect(b.capture.dispose).toHaveBeenCalled()
   expect(b.transcribe).not.toHaveBeenCalled()
   expect(b.inputActions.submit).not.toHaveBeenCalled()
+})
+
+it.each(['blur', 'hidden'])('pauses a live recording on %s and resumes it on focus', async (how) => {
+  const b = fixture()
+  await start()
+  if (how === 'blur') fireEvent.blur(window)
+  else {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    fireEvent(document, new Event('visibilitychange'))
+  }
+  // Focus loss no longer kills the turn (it flickered the buttons on phones):
+  // the cross stays on screen and nothing is released.
+  expect(screen.getByRole('button', { name: zh['voiceChat.stop'] })).toBeTruthy()
+  expect(b.capture.dispose).not.toHaveBeenCalled()
+  // Focus returns and the turn is still live: it can still transcribe and send.
+  if (how === 'blur') fireEvent.focus(window)
+  else {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+    fireEvent(document, new Event('visibilitychange'))
+    delete (document as { hidden?: boolean }).hidden
+  }
+  stop()
+  await waitFor(() => {
+    expect(b.inputActions.setDraft).toHaveBeenCalledWith(transcript.text)
+    expect(b.inputActions.submit).toHaveBeenCalled()
+  })
 })
 
 it('cancels a pending permission request from the button', async () => {
