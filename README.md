@@ -40,3 +40,30 @@ The client bundle is a CJS closure factory registered with the host's module
 loader under the package name; platform modules (react, primitives, slots,
 gateway) stay externals, everything else inlines. CSS modules are compiled
 with lightningcss and injected as self-managed style tags.
+
+## Installing (bundle)
+
+The package declares a `dsh.bundle` with `cordis.patch.yml`: installing it
+disables the upstream `ui-voice-input` row (inserted by the dsh-voice-chat
+kit) and inserts this plugin as `ui-voice`. The dsh-voice-chat kit (the
+speech-to-text side) must be installed in the same profile, in any order —
+the kit inserts its row first, this bundle patches it.
+
+```
+dsh plugin add ./dsh-voice-1.0.0.tgz        # tarball: pnpm pack in this repo
+dsh plugin add github:martindye/dsh-voice   # from GitHub (needs the allowline below)
+dsh plugin add @martin/dsh-voice            # once published to npm
+```
+
+For `github:` installs, pnpm >= 10 refuses to run the `prepare` build until
+the user allowlists it in the profile's `pnpm-workspace.yaml` (copy the
+exact key pnpm prints; pin a commit for safety):
+
+```yaml
+allowBuilds:
+  '@martin/dsh-voice': true
+```
+
+The built `lib/` is committed, so an install that skips the build still
+ships working prebuilt code; `prepare` rebuilds it from `src/` when the
+toolchain is available.

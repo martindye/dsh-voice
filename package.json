@@ -19,6 +19,7 @@
   "files": [
     "src",
     "lib",
+    "cordis.patch.yml",
     "README.md"
   ],
   "scripts": {
@@ -32,6 +33,9 @@
     "tsdown": "^0.22.2"
   },
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "inject": [
         "@deepseek-ai/dsh-api-remotes",

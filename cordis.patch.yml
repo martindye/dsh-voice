@@ -1,0 +1,13 @@
+# Voice: @martin/dsh-voice replaces the upstream voice input UI.
+# The upstream entry (inserted by the dsh-voice-chat kit) is disabled so only
+# one voice composer loads; everything else the kit inserts (STT stack,
+# voice-chat TTS kit) is untouched.
+#
+# Ordering note: this bundle's layer must apply AFTER the dsh-voice-chat kit
+# bundle (it patches a row that the kit inserts) - install the kit first.
+- id: ui-voice-input
+  name: '@deepseek-ai/dsh-experimental-client-ui-voice-input'
+  disabled: true
+- insert:
+  - id: ui-voice
+    name: '@martin/dsh-voice'
