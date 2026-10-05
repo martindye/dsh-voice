@@ -92,10 +92,6 @@ const VAD_TICK_MS = 250
 /** Continuous listening: reopen the mic this long after a reply ends, when no
  *  reply speech is expected (device muted). */
 const LISTEN_SETTLE_MS = 3000
-/** After a reply ends, an auto-opened microphone that draws no words is
- *  re-offered up to this many times in a row, so a pause between messages
- *  does not kill the back-and-forth; then it rests until the next reply. */
-const MAX_EMPTY_LISTENS = 4
 /** A sent turn that never reports `running` (dropped, or still walking the
  *  submit pipeline) releases the stop square after this long. */
 const PENDING_TURN_EXPIRY_MS = 120_000
@@ -226,7 +222,6 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   // reopens the microphone so the conversation continues without a tap.
   const [armed, setArmed] = useState(false)
   const turnEndedAt = useRef<number>(), sawSpeech = useRef(false), prevRunning = useRef(running)
-  const emptyListens = useRef(0)
   // A sent message whose turn the session has not reported as running yet
   // (still in the submit pipeline, or the status event lags): while it is in
   // flight the button keeps the stop square instead of falling back to the
@@ -242,7 +237,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   useEffect(() => {
     runningChanged(running)
     if (prevRunning.current && running === false) {
-      turnEndedAt.current = Date.now(); sawSpeech.current = false; emptyListens.current = 0
+      turnEndedAt.current = Date.now(); sawSpeech.current = false
       turnInFlight.current = false
     }
     prevRunning.current = running
@@ -280,7 +275,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     setMessage(''); setPhase('idle'); setSetupOpen(false)
     setArmed(false); turnEndedAt.current = undefined; sawSpeech.current = false
     turnInFlight.current = false
-    emptyListens.current = 0; paused.current = false; focusPaused.current = false
+    paused.current = false; focusPaused.current = false
     // Focus loss (a notification, screen lock, app switch) pauses a live
     // recording instead of ending it: on a phone the window blurs all the
     // time, and a killed turn flickered the mute button back to the dictate
@@ -361,10 +356,6 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
         // Nothing worth sending: settle back to the composer exactly as found,
         // buttons included — a tapped tap that caught no words is no different
         // from an auto-open that drew no air. No feedback row, no dead end.
-        if (active.autoOpen) {
-          emptyListens.current += 1
-          if (emptyListens.current >= MAX_EMPTY_LISTENS) turnEndedAt.current = undefined
-        }
         cancel()
         return
       }
@@ -384,10 +375,6 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
         // A fully muted (or dead) microphone captured nothing: settle back to
         // the buttons quietly, for a tapped turn as much as an auto-open.
         // cancel() releases the capture.
-        if (active.autoOpen) {
-          emptyListens.current += 1
-          if (emptyListens.current >= MAX_EMPTY_LISTENS) turnEndedAt.current = undefined
-        }
         cancel()
         return
       }
@@ -441,15 +428,12 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
       }
       if (active.vadHeardAt === undefined) {
         if (now - active.vadStart >= NO_SPEECH_MS) {
-          // An auto-opened turn that drew no words settles quietly and the
-          // microphone is offered again (the tick keeps it armed), so a pause
-          // between messages does not end the conversation; after a few empty
-          // listens it rests. A turn the user tapped gets an explanation.
-          if (active.autoOpen) {
-            emptyListens.current += 1
-            if (emptyListens.current >= MAX_EMPTY_LISTENS) turnEndedAt.current = undefined
-          }
-          cancel(); if (!active.autoOpen) feedback(t('interrupted'))
+          // A tapped turn that draws no words gives up with an explanation.
+          // An auto-opened one simply keeps listening: speech mode runs
+          // until the user says otherwise, and the max-duration timer
+          // re-arms it quietly when the buffer has grown too stale.
+          if (active.autoOpen) return
+          cancel(); feedback(t('interrupted'))
         }
         return
       }
@@ -460,8 +444,8 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   }, [phase, cancel, feedback, finish, t])
   // Continuous listening: when a reply has ended (thought AND, if spoken,
   // heard), reopen the microphone so the next words need no tap. An
-  // auto-open that draws no words is quietly re-offered (a few times), so
-  // the conversation stays open across pauses instead of dying on one gap.
+  // auto-open that draws no words is quietly re-offered again, so the
+  // conversation stays open until the user says otherwise.
   useEffect(() => {
     if (!armed || !empty || locked || running || speaking || phase !== 'idle') return
     const tick = (): void => {
