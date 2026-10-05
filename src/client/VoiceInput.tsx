@@ -524,12 +524,18 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   const sendDisabled = locked || (running ? empty && stop === undefined : empty)
   const label = stopMode ? (busyTurn ? t('stopGenerating') : t('stopSpeech')) : voiceMode ? t('voiceChat.start') : t('send')
   return <>
-    <Tooltip label={t('dictate')} disabled={!usable} side="top" portal>
-      <span className={css.triggerAnchor}><Button className={css.trigger} size="sm" disabled={locked}
-        aria-label={t(usable ? 'start' : 'setupPrompt.trigger')} aria-haspopup={usable ? undefined : 'dialog'}
-        onMouseDown={(event) => { event.preventDefault() }}
-        onClick={() => { if (usable) void start(); else setSetupOpen(true) }}><IconMicrophoneOutlineRegular size={20} /></Button></span>
-    </Tooltip>
+    {/* The dictate mic is a pre-voice-conversation affordance. Once speech
+        mode is on (armed) it must never appear: the unified button alone
+        carries the voice entry (waveform), the stop square, and the send
+        arrow, so the button row can't flip back to a dictate mic mid-talk. */}
+    {!armed && (
+      <Tooltip label={t('dictate')} disabled={!usable} side="top" portal>
+        <span className={css.triggerAnchor}><Button className={css.trigger} size="sm" disabled={locked}
+          aria-label={t(usable ? 'start' : 'setupPrompt.trigger')} aria-haspopup={usable ? undefined : 'dialog'}
+          onMouseDown={(event) => { event.preventDefault() }}
+          onClick={() => { if (usable) void start(); else setSetupOpen(true) }}><IconMicrophoneOutlineRegular size={20} /></Button></span>
+      </Tooltip>
+    )}
     <Tooltip label={label} side="top" portal>
       <span className={css.triggerAnchor}><Button type="button" data-voice-unified="1" className={`${css.voiceChat} ${css.voiceChatOn}`} size="sm"
         aria-label={label}
