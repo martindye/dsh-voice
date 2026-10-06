@@ -378,3 +378,38 @@ it('shows exactly one designed handover when speech starts during an auto-open (
   }
   expect(recordingSessions(atAutoOpen)).toBe(2)
 }, 60000)
+
+it('exits speech mode on stop: the default row returns and the mic does not reopen', async () => {
+  currentTest = 'stop exits speech mode'
+  const s = makeSim()
+  watch(s.container, 'mount')
+
+  // One full turn puts the conversation into speech mode (the dictate mic goes away).
+  await startTurn(s)
+  watch(s.container, 'turn1 recording')
+  await speak(s)
+  await waitSubmitted(s)
+  s.snapshot.running = true; s.rerender()
+  await s.waitForPrimary('stopGenerating')
+  watch(s.container, 'agent running')
+  expect(s.container.querySelector('button[aria-label="start"]')).toBeNull() // speech mode: no dictate
+
+  // The user stops the reply.
+  s.tapUnified()
+  s.snapshot.running = false; s.rerender()
+  watch(s.container, 'stopped')
+
+  // Back to the default row: the dictate mic is back, the button is the
+  // voice entry, and nothing is recording.
+  expect(s.container.querySelector('button[aria-label="start"]')).toBeTruthy()
+  await s.waitForPrimary('voiceChat.start')
+
+  // And it stays there: no auto-open crosses into a live microphone.
+  await sleep(4200)
+  watch(s.container, 'settle window passed')
+  expect(s.container.querySelector('button[aria-label="voiceChat.stop"]')).toBeNull()
+  expect(probe(s.container).unified).toBe('voiceChat.start')
+  expect(recordingSessions()).toBe(1) // only the first turn ever opened the mic
+
+  printTrace(currentTest)
+}, 60000)

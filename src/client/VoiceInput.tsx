@@ -239,6 +239,10 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     if (prevRunning.current && running === false) {
       turnEndedAt.current = Date.now(); sawSpeech.current = false
       turnInFlight.current = false
+      // The reset lives in refs, so bump a state: without a re-render the
+      // button keeps showing the stop square it computed before the flag
+      // cleared (the row then reads "still mid-conversation" forever).
+      bumpPending(n => n + 1)
     }
     prevRunning.current = running
   }, [running])
@@ -532,6 +536,12 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
             // button if rendered, else the session-scoped cancel).
             if (busyTurn) { if (running === true) stop?.(); else stopTurn(sessionId) }
             if (speaking) stopSpeaking()
+            // Stopping is the "further notice" for speech mode: go back to the
+            // default [dictate + waveform] row, and keep continuous listening
+            // from reopening the microphone into a mid-conversation cross.
+            setArmed(false)
+            turnEndedAt.current = undefined
+            sawSpeech.current = false
             return
           }
           if (voiceMode) { if (usable) void start(); else setSetupOpen(true); return }
