@@ -16,8 +16,12 @@
    base ghost button repaints the circle pale grey under the pointer. */
 .micToggleMuted:is(.micToggleMuted) { background: var(--dsw-alias-state-error-primary, #d13438); color: #fff; }
 .micToggleMuted:is(.micToggleMuted):hover:is(.micToggleMuted) { background: var(--dsw-alias-state-error-primary, #d13438); filter: brightness(0.92); }
-/* The voice-chat buttons during a turn keep a steady gap between circles. */
-.voiceChatPair { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+/* The voice-chat buttons during a turn. display:contents removes the wrapper
+   box so the mute and voice circles become direct composer-slot children,
+   exactly like the default dictate-plus-voice row — the composer's own gap
+   then applies between them. A wrapper flex of its own read as squashed
+   against the app's spacing (2026-10-06). */
+.voiceChatPair { display: contents; }
 /* Dictate microphone plus an overlaid strike-through for the mute control. */
 .muteGlyph { position: relative; display: inline-flex; }
 .muteGlyph svg:last-child { position: absolute; inset: 0; }
