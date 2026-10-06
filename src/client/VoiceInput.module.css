@@ -26,6 +26,14 @@
 .muteGlyph { position: relative; display: inline-flex; }
 .muteGlyph svg:last-child { position: absolute; inset: 0; }
 .triggerAnchor { display: inline-flex; flex: none; }
+/* The app's .activity div holds the row buttons with no gap of its own, so
+   without this the two circles sit touching. Take the composer's own
+   trailing rhythm (12px; 8px in narrow cards - the app's @container break)
+   so the row matches the +/shield/model controls beside it. */
+.triggerAnchor + .triggerAnchor { margin-left: 12px; }
+@container (max-width: 560px) {
+  .triggerAnchor + .triggerAnchor { margin-left: 8px; }
+}
 .captureRow { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; min-height: 34px; }
 .roundButton { width: 32px; height: 32px; padding: 0; border-radius: 50%; corner-shape: round; flex: none; background: var(--dsw-specific-selector); }
 .roundButton:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-solid); }
