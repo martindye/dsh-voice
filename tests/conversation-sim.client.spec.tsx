@@ -128,6 +128,7 @@ const transcript: Transcript = { text: 'hello world', audioSeconds: 1.4, inferen
 
 interface Sim {
   container: HTMLElement
+  input: HTMLElement
   snapshot: { running: boolean }
   inputActions: { submit: ReturnType<typeof vi.fn>; setDraft: ReturnType<typeof vi.fn> }
   capture: InstanceType<typeof Recording> & Record<string, unknown>
@@ -179,14 +180,16 @@ function makeSim(): Sim {
     stopTurn: vi.fn(),
     t,
   }
-  // The composer the host renders around the plugin entry.
+  // The composer the host renders around the plugin entry: card → input, and
+  // the seat the plugin row lands in — the plugin is INSIDE its composer card.
   const card = document.createElement('div'); card.setAttribute('data-composer-card', '')
   const input = document.createElement('div'); input.setAttribute('data-composer-input', ''); input.setAttribute('contenteditable', 'true')
-  card.append(input); document.body.append(card)
-  const view = render(<VoiceInput {...props} />)
+  const seat = document.createElement('div'); seat.setAttribute('data-composer-seat', '')
+  card.append(input, seat); document.body.append(card)
+  const view = render(<VoiceInput {...props} />, { container: seat })
   const container = view.container
   return {
-    container, snapshot, inputActions, capture,
+    container, input, snapshot, inputActions, capture,
     rerender: () => { view.rerender(<VoiceInput {...props} />) },
     setAmplitude: (rms: number) => { amplitude.value = rms },
     setSpeaking: (on: boolean) => {
@@ -251,7 +254,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (speakingButton) { speakingButton.remove(); speakingButton = null }
-  document.querySelector('[data-composer-card]')?.remove()
+  document.querySelectorAll('[data-composer-card]').forEach((node) => node.remove())
   cleanup()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -469,6 +472,48 @@ it('the mute joins the row only during a voice conversation', async () => {
   await s.waitForPrimary('voiceChat.start')
   expect(s.container.querySelector('button[aria-label="start"]')).toBeTruthy()
   expect(probe(s.container).mute).toBe('none')
+
+  printTrace(currentTest)
+}, 60000)
+
+it('turns the voice button into a send arrow while a draft is typed', async () => {
+  const s = makeSim()
+  currentTest = 'draft send arrow'
+  watch(s.container, 'mount')
+
+  expect(probe(s.container).unified).toBe('voiceChat.start')
+
+  // Typing in the composer flips the button to the send arrow.
+  s.input.textContent = 'hello there'
+  s.input.dispatchEvent(new Event('input', { bubbles: true }))
+  await waitFor(() => { expect(probe(s.container).unified).toBe('send') }, { timeout: 4000, interval: 50 })
+  watch(s.container, 'typed')
+
+  // Clearing the draft brings the voice entry back.
+  s.input.textContent = ''
+  s.input.dispatchEvent(new Event('input', { bubbles: true }))
+  await waitFor(() => { expect(probe(s.container).unified).toBe('voiceChat.start') }, { timeout: 4000, interval: 50 })
+  watch(s.container, 'cleared')
+
+  printTrace(currentTest)
+}, 60000)
+
+it('watches its own composer when a hidden one sits earlier in the document', async () => {
+  // The shape of the production page on a phone: another (hidden) composer
+  // earlier in document order. A bare document.querySelector would track its
+  // empty input and the arrow would never appear.
+  const decoy = document.createElement('div'); decoy.setAttribute('data-composer-card', ''); decoy.setAttribute('hidden', '')
+  const decoyInput = document.createElement('div'); decoyInput.setAttribute('data-composer-input', '')
+  decoy.append(decoyInput); document.body.prepend(decoy)
+
+  const s = makeSim()
+  currentTest = 'own-composer'
+  watch(s.container, 'mount')
+
+  s.input.textContent = 'hello'
+  s.input.dispatchEvent(new Event('input', { bubbles: true }))
+  await waitFor(() => { expect(probe(s.container).unified).toBe('send') }, { timeout: 4000, interval: 50 })
+  watch(s.container, 'typed on own composer')
 
   printTrace(currentTest)
 }, 60000)

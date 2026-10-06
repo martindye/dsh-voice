@@ -1,5 +1,6 @@
 /** Unified composer action: one button sends text, stops the running turn, and runs voice-chat turns. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TokenSpan } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -44,27 +45,43 @@ export type VoiceInputProps = Pick<PropsRuntime<'conversation.input.activity'>, 
 /**
  * The composer draft is empty while the editable input carries neither text
  * nor file-reference chips, and the composer card stages no images.
+ *
+ * The watcher anchors on this plugin's own card: the row renders inside the
+ * composer, so the nearest [data-composer-card] is always the composer this
+ * row belongs to, even when other (hidden) composers sit earlier in the
+ * document and a bare document.querySelector would track the wrong one. A
+ * document-level input listener backstops the mutation observer.
  */
-function useComposerEmpty(): boolean {
+function useComposerEmpty(cardRef: RefObject<HTMLElement | null>): boolean {
   const [empty, setEmpty] = useState(true)
   useEffect(() => {
     let observer: MutationObserver | undefined
     let retry = 0
     let timer = 0
+    let input: HTMLElement | null = null
+    let card: HTMLElement | null = null
     const read = (): void => {
-      const input = document.querySelector<HTMLElement>('[data-composer-input]')
       if (input === null) return
-      const card = input.closest('[data-composer-card]')
       const chipFree = input.querySelector('[data-composer-chip]') === null
         && card?.querySelector('[data-composer-chip], img') === null
       setEmpty((input.textContent ?? '').trim() === '' && chipFree)
     }
-    const attach = (): boolean => {
-      if (document.querySelector('[data-composer-input]') === null) return false
+    const onInput = (event: Event): void => {
+      if (input === null || !(event.target instanceof Node) || !input.contains(event.target)) return
       read()
-      const target = document.querySelector('[data-composer-card]') ?? document.body
+    }
+    const attach = (): boolean => {
+      const anchor = cardRef.current
+      card = anchor?.closest<HTMLElement>('[data-composer-card]')
+        ?? document.querySelector<HTMLElement>('[data-composer-card]')
+      input = card?.querySelector<HTMLElement>('[data-composer-input]')
+        ?? document.querySelector<HTMLElement>('[data-composer-input]')
+      if (input === null) return false
+      read()
+      const target = card ?? document.body
       observer = new MutationObserver(read)
       observer.observe(target, { subtree: true, childList: true, characterData: true })
+      document.addEventListener('input', onInput)
       return true
     }
     if (!attach()) {
@@ -76,6 +93,7 @@ function useComposerEmpty(): boolean {
     return () => {
       window.clearInterval(timer)
       observer?.disconnect()
+      document.removeEventListener('input', onInput)
     }
   }, [])
   return empty
@@ -206,7 +224,10 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   // Turn and draft state read from the session and the composer itself, so
   // the button works on a host that never heard of the slot extension.
   const running = useSession(snapshot => snapshot.running) ?? false
-  const empty = useComposerEmpty()
+  // Anchor of this row, rendered inside its composer card: it pins the draft
+  // watcher to THIS composer even when other composers mount in the document.
+  const cardRef = useRef<HTMLElement | null>(null)
+  const empty = useComposerEmpty(cardRef)
   const stop: (() => void) | undefined = running ? () => { stopTurn(sessionId) } : undefined
   const readiness = useSpeechReadiness(value => value), catalog = readiness.catalog
   const [speaking, stopSpeaking] = useSpeakingSignal()
@@ -488,7 +509,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   if (phase === 'requesting' || phase === 'recording' || phase === 'transcribing') {
     const label = phase === 'recording' ? t('voiceChat.stop') : phase === 'requesting' ? t('cancel') : t('transcribingShort')
     return (
-      <span className={css.voiceChatPair}>
+      <span className={css.voiceChatPair} ref={cardRef}>
         {muteButton}
         <Tooltip label={label} side="top" portal>
           <span className={css.triggerAnchor}><Button type="button" className={`${css.voiceChat} ${css.voiceChatOn}`} size="sm"
@@ -500,7 +521,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
       </span>
     )
   }
-  if (phase === 'feedback') return <div className={css.captureRow} data-voice-activity={phase}>
+  if (phase === 'feedback') return <div className={css.captureRow} data-voice-activity={phase} ref={cardRef}>
     <Button type="button" className={css.roundButton} size="sm" aria-label={t('cancel')}
       onClick={cancel}><IconCloseOutlineRegular size={14} /></Button>
     <span className={css.activityMessage} role="status" title={message}>{message}</span>
@@ -535,7 +556,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     )}
     {armed && muteButton}
     <Tooltip label={label} side="top" portal>
-      <span className={css.triggerAnchor}><Button type="button" data-voice-unified="1" className={`${css.voiceChat} ${css.voiceChatOn}`} size="sm"
+      <span className={css.triggerAnchor} ref={cardRef}><Button type="button" data-voice-unified="1" className={`${css.voiceChat} ${css.voiceChatOn}`} size="sm"
         aria-label={label}
         disabled={stopMode ? false : voiceMode ? locked || !usable : sendDisabled}
         onMouseDown={(event) => { event.preventDefault() }}
