@@ -389,7 +389,6 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   const start = async (autoOpen = false): Promise<void> => {
     if (!catalog || !usable || locked || current.current) return
     if (!autoOpen) paused.current = false // a deliberate tap resumes a parked mic
-    mutedRef.current = false; setMuted(false) // every turn starts hearing
     armVoiceChat()
     const run = ++generation.current
     const active: ActiveRecording = { capture: createRecording(), abort: new AbortController(),
@@ -405,6 +404,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
         feedback(failureText(failure))
       })
       if (run !== generation.current || current.current !== active) return
+      active.capture.setMuted(mutedRef.current) // persistent mute: open in its current state
       active.phase = 'recording'
       setPhase('recording')
       active.timer = setTimeout(() => { void finish() }, active.maxDurationSeconds * 1000)
@@ -453,7 +453,9 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   useEffect(() => {
     if (!armed || !empty || locked || running || speaking || phase !== 'idle') return
     const tick = (): void => {
-      if (paused.current || current.current || phase !== 'idle') return
+      // A muted mic stays closed: opening it would only churn, and the tick
+      // re-opens it the moment the user unmutes.
+      if (paused.current || mutedRef.current || current.current || phase !== 'idle') return
       const ended = turnEndedAt.current
       if (ended === undefined) return
       if (sawSpeech.current || Date.now() - ended >= LISTEN_SETTLE_MS) {
@@ -472,16 +474,19 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   useEffect(() => {
     if (speaking && current.current?.autoOpen) cancel()
   }, [speaking])
+  // The mute is a permanent member of the row — present in every state (idle,
+  // thinking, speaking, recording) so it can never disappear — and its state
+  // persists across turns: a muted microphone opens muted until toggled back.
+  const muteButton = (
+    <span className={css.triggerAnchor}><Button type="button" className={`${css.voiceChat} ${muted ? css.micToggleMuted : css.voiceChatOn}`} size="sm"
+      aria-label={muted ? t('unmuteMic') : t('muteMic')}
+      onMouseDown={(event) => { event.preventDefault() }}
+      onClick={toggleMute}><MicMutedGlyph /></Button></span>
+  )
   if (phase === 'requesting' || phase === 'recording' || phase === 'transcribing') {
     const label = phase === 'recording' ? t('voiceChat.stop') : phase === 'requesting' ? t('cancel') : t('transcribingShort')
     return (
       <span className={css.voiceChatPair}>
-        {phase === 'recording' && (
-          <span className={css.triggerAnchor}><Button type="button" className={`${css.voiceChat} ${muted ? css.micToggleMuted : css.voiceChatOn}`} size="sm"
-            aria-label={muted ? t('unmuteMic') : t('muteMic')}
-            onMouseDown={(event) => { event.preventDefault() }}
-            onClick={toggleMute}><MicMutedGlyph /></Button></span>
-        )}
         <Tooltip label={label} side="top" portal>
           <span className={css.triggerAnchor}><Button type="button" className={`${css.voiceChat} ${css.voiceChatOn}`} size="sm"
             aria-label={label} aria-busy={phase === 'transcribing'} disabled={phase === 'transcribing'}
@@ -489,6 +494,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
             onClick={() => { if (phase === 'requesting') cancel(); else if (phase === 'recording') void finish() }}>
             {phase === 'transcribing' ? <StateDot state="ongoing" /> : phase === 'recording' ? <CloseGlyph /> : <VoiceChatGlyph />}</Button></span>
         </Tooltip>
+        {muteButton}
       </span>
     )
   }
@@ -498,6 +504,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     <span className={css.activityMessage} role="status" title={message}>{message}</span>
     <Button type="button" className={css.roundButton} size="sm" aria-label={t('retryRecording')} disabled={!usable || locked}
       onClick={() => { void start() }}><IconMicrophoneOutlineRegular size={18} /></Button>
+    {muteButton}
   </div>
   // Stop square while a turn is in flight — the session reports it running, OR
   // this plugin sent a message that has not reported running yet — or the
@@ -549,6 +556,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
         }}>
         {stopMode ? <StopSquareGlyph /> : voiceMode ? <VoiceChatGlyph /> : <SendArrowGlyph />}</Button></span>
     </Tooltip>
+    {muteButton}
     <VoiceSetupDialog open={setupOpen && !usable}
       needsInstallation={readiness.connected && provider?.location === 'host-local' && provider.preparation.phase === 'unprepared'}
       onDismiss={() => { setSetupOpen(false) }} onOpenDetails={() => { setSetupOpen(false); openSettings() }} t={t} />

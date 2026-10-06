@@ -17,6 +17,8 @@
  *  - I3: when the system starts speaking during an auto-opened
  *    microphone, there is exactly one designed handover per reply
  *    (recording -> speaking-stop-square -> recording), never a bare idle.
+ *  - I4: the mute is a permanent member of the row — present in every state
+ *    and its state persists across turns (a muted microphone opens muted).
  */
 import { writeFileSync } from 'node:fs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -136,6 +138,7 @@ interface Sim {
   hide: () => void
   show: () => void
   tapUnified: () => void
+  tapMute: () => void
   waitForPrimary: (label: string) => Promise<void>
 }
 
@@ -149,6 +152,7 @@ function makeSim(): Sim {
     start: vi.fn(async () => {}),
     stop: vi.fn(async () => new Uint8Array(48)),
     amplitude: vi.fn(() => amplitude.value),
+    setMuted: vi.fn(),
     dispose: vi.fn(async () => {}),
   })
   const inputActions = {
@@ -200,6 +204,11 @@ function makeSim(): Sim {
       const unified = container.querySelector<HTMLButtonElement>('[data-voice-unified="1"]')
       if (!unified) throw new Error('no unified button rendered')
       fireEvent.click(unified)
+    },
+    tapMute: () => {
+      const mute = container.querySelector<HTMLButtonElement>('button[aria-label="muteMic"], button[aria-label="unmuteMic"]')
+      if (!mute) throw new Error('no mute button rendered')
+      fireEvent.click(mute)
     },
     waitForPrimary: async (label: string) => {
       await waitFor(() => {
@@ -410,6 +419,49 @@ it('exits speech mode on stop: the default row returns and the mic does not reop
   expect(s.container.querySelector('button[aria-label="voiceChat.stop"]')).toBeNull()
   expect(probe(s.container).unified).toBe('voiceChat.start')
   expect(recordingSessions()).toBe(1) // only the first turn ever opened the mic
+
+  printTrace(currentTest)
+}, 60000)
+
+it('keeps the mute in every state and persists its state across turns', async () => {
+  const s = makeSim()
+  currentTest = 'mute-always-present'
+  watch(s.container, 'mount')
+
+  // The default row (dictate + waveform) already carries the mute.
+  expect(probe(s.container).mute).toBe('muteMic')
+  expect(s.container.querySelector('button[aria-label="start"]')).toBeTruthy()
+
+  // Muting while idle flips the button to the muted state.
+  s.tapMute()
+  watch(s.container, 'muted idle')
+  expect(probe(s.container).mute).toBe('unmuteMic')
+
+  // A new turn honours the persistent state: the microphone opens muted.
+  await startTurn(s)
+  expect(s.capture.setMuted).toHaveBeenCalledWith(true)
+
+  // And it is genuinely quiet: speaking into a muted microphone sends nothing.
+  await speak(s)
+  await sleep(2600) // well past the 2 s silence window
+  expect(s.inputActions.submit).not.toHaveBeenCalled()
+
+  // Unmute and finish the turn the ordinary way.
+  s.tapMute()
+  expect(probe(s.container).mute).toBe('muteMic')
+  expect(s.capture.setMuted).toHaveBeenLastCalledWith(false)
+  await speak(s)
+  await waitSubmitted(s)
+
+  // The mute is still there while the agent works — and when it finishes.
+  s.snapshot.running = true; s.rerender()
+  await s.waitForPrimary('stopGenerating')
+  watch(s.container, 'agent running')
+  expect(probe(s.container).mute).toBe('muteMic')
+
+  s.snapshot.running = false; s.rerender()
+  await s.waitForPrimary('voiceChat.start')
+  expect(probe(s.container).mute).toBe('muteMic')
 
   printTrace(currentTest)
 }, 60000)
