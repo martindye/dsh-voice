@@ -104,6 +104,12 @@ export const zh = {
   unavailable: '当前浏览器不支持录音，请使用支持麦克风的浏览器。',
   permission: '麦克风权限未开启，请在浏览器和系统设置中允许访问。',
   tooLarge: '录音超过服务限制，请缩短录音后重试。',
+  speak: '朗读此消息',
+  speakStop: '停止朗读',
+  speakPreparing: '正在准备朗读…',
+  autovoice: '切换自动朗读',
+  'autovoice.on': '自动朗读已开启：新回复在本设备自动朗读',
+  'autovoice.off': '自动朗读已关闭（本设备）',
 } as const
 
 /** Keys accepted by the voice input translator. */
@@ -210,6 +216,12 @@ export const en: Record<VoiceKey, string> = {
   unavailable: 'This browser cannot record audio. Use a browser with microphone support.',
   permission: 'Microphone access is disabled. Allow it in browser and system settings.',
   tooLarge: 'The recording exceeds the service limit. Try a shorter recording.',
+  speak: 'Speak this message',
+  speakStop: 'Stop speaking',
+  speakPreparing: 'Preparing speech…',
+  autovoice: 'Toggle auto-read',
+  'autovoice.on': 'Auto-read on: fresh replies are read aloud on this device',
+  'autovoice.off': 'Auto-read off for this device',
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {

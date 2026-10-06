@@ -1,7 +1,7 @@
 {
   "name": "@martin/dsh-voice",
   "version": "1.0.0",
-  "description": "Martin's two-way voice for the DSH web app: the unified voice composer with continuous listening, spoken pause and in-call mute. Forked from @deepseek-ai/dsh-experimental-client-ui-voice-input 0.1.7-rc.2 and maintained here as a standalone plugin.",
+  "description": "Martin's self-contained two-way voice plugin for the DSH web app: unified voice composer in, per-message speaker buttons and auto-read out (own TTS server), plus the speech-to-text wiring. Forked from @deepseek-ai/dsh-experimental-client-ui-voice-input 0.1.7-rc.2 and maintained here as a standalone plugin.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -20,7 +20,10 @@
     "src",
     "lib",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "tts",
+    "bin",
+    "ref_voices"
   ],
   "scripts": {
     "bundle": "tsdown",

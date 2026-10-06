@@ -1,13 +1,24 @@
-# Voice: @martin/dsh-voice replaces the upstream voice input UI.
-# The upstream entry (inserted by the dsh-voice-chat kit) is disabled so only
-# one voice composer loads; everything else the kit inserts (STT stack,
-# voice-chat TTS kit) is untouched.
+# @martin/dsh-voice — self-contained two-way voice for the DSH web app.
 #
-# Ordering note: this bundle's layer must apply AFTER the dsh-voice-chat kit
-# bundle (it patches a row that the kit inserts) - install the kit first.
+# One bundle for the whole voice round-trip:
+#   in : the unified voice composer (this plugin's ui-voice slot)
+#   out: per-message speaker buttons + auto-read (this plugin's tts service)
+# The speech-to-text stack is inserted here as well, so the web profile no
+# longer needs the retired dsh-voice-chat kit.
 - id: ui-voice-input
   name: '@deepseek-ai/dsh-experimental-client-ui-voice-input'
   disabled: true
 - insert:
   - id: ui-voice
     name: '@martin/dsh-voice'
+  - id: speech-to-text
+    name: '@deepseek-ai/dsh-experimental-speech-to-text'
+    config:
+      defaultProvider: sensevoice-local
+      language: en
+  - id: speech-to-text-sensevoice
+    name: '@deepseek-ai/dsh-experimental-speech-to-text-sensevoice'
+    config:
+      dataRoot: !!js dshHomePath('speech-to-text', 'sensevoice')
+  - id: api-speech-to-text
+    name: '@deepseek-ai/dsh-experimental-api-speech-to-text'

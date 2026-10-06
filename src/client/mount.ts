@@ -17,6 +17,9 @@ import { armPageAudioUnlock } from './audio-unlock.ts'
 import { observeReadiness } from './readiness.ts'
 import { VoicePreparation } from './PreparationCard.tsx'
 import { VoiceSetupPrompt } from './VoiceSetupPrompt.tsx'
+import { TTS_REMOTE, noteTtsStatus, setTtsRemote, speakNow as speakNowTts } from './tts.ts'
+import { SpeakerButton } from './SpeakerButton.tsx'
+import { AutoReadToggle } from './AutoReadToggle.tsx'
 
 export const inject = ['remote', 'slots', 'locale', 'pluginNavigation']
 
@@ -122,7 +125,20 @@ function registerUi(ctx: Context): void {
   ctx.slots.inject('plugins.bundle.activation', () => ctx.slots.register({ name: 'plugins.bundle.activation',
     key: '@deepseek-ai/dsh-experimental-voice-input-bundle', locale: NS, inject: () => actions,
   }, VoiceSetupPrompt))
-
+  // Output side: a speaker button on each finalized assistant message and a
+  // per-device auto-read toggle in the session header corner.
+  ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
+    name: 'conversation.chat.assistant-actions', id: 'speak', order: 20, locale: NS,
+    inject: (sessionId?: unknown) => ({
+      speakNow: (messageId: string) => {
+        if (typeof sessionId === 'string' && typeof messageId === 'string') speakNowTts(sessionId, messageId)
+      },
+    }),
+  }, SpeakerButton))
+  ctx.slots.inject('conversation.session.header.corner', () => ctx.slots.register({
+    name: 'conversation.session.header.corner', locale: NS,
+    inject: () => ({}),
+  }, AutoReadToggle))
 }
 
 /**
@@ -137,13 +153,30 @@ export async function mountVoiceInput(ctx: Context, contribution: TypertRemoteCo
   armPageAudioUnlock()
   const disposeRemote = await ctx.remote.$mount(contribution)
   const disposeMetrics = await ctx.remote.$mount(METRICS_REMOTE as unknown as TypertRemoteContribution)
+  const disposeTts = await ctx.remote.$mount(TTS_REMOTE as unknown as TypertRemoteContribution)
+  setTtsRemote(ctx.remote)
   setMetricsSink((entry) => {
     try {
       const ns = (ctx.remote as unknown as { voiceMetrics?: { log?: (entry: Record<string, unknown>) => unknown } }).voiceMetrics
       void Promise.resolve(ns?.log?.(entry)).catch(() => { /* metrics never break the voice path */ })
     } catch { /* ditto */ }
   })
+  // Keep the output status (server up/down, active engine) fresh for the
+  // header toggle's tooltip; the host starts the server lazily on demand.
+  const pollTtsStatus = () => {
+    try {
+      const ns = (ctx.remote as unknown as { tts?: { status?: () => Promise<unknown> } }).tts
+      void ns?.status?.().then((r) => {
+        const out = r && typeof r === 'object' && 'ok' in (r as object)
+          ? (r as { value?: unknown }).value
+          : r
+        noteTtsStatus(out as { server?: string; engine?: string } | null)
+      }).catch(() => { /* status is cosmetic */ })
+    } catch { /* status is cosmetic */ }
+  }
+  void pollTtsStatus()
+  const statusTimer = setInterval(pollTtsStatus, 25_000)
   const ui = ctx.inject(['remote.speech', 'sessions', 'slots', 'locale', 'pluginNavigation'], registerUi)
-  try { await ui } catch (error) { await ui.dispose(); await disposeRemote(); await disposeMetrics(); throw error }
-  return async () => { await ui.dispose(); await disposeRemote(); await disposeMetrics() }
+  try { await ui } catch (error) { await ui.dispose(); await disposeRemote(); await disposeMetrics(); await disposeTts(); throw error }
+  return async () => { clearInterval(statusTimer); await ui.dispose(); await disposeRemote(); await disposeMetrics(); await disposeTts() }
 }

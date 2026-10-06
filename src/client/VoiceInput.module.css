@@ -71,3 +71,12 @@
 .setupEstimate dt { color: var(--dsw-alias-label-tertiary); }
 .setupEstimate dd { margin: 0; }
 .setupEstimate small { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+
+/* ------------------------------------------------- output (speaker) side */
+.speakButton { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; }
+.speakButton:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-solid, var(--dsw-alias-interactive-bg-hover)); }
+.speakBusy { opacity: 0.45; cursor: progress; }
+.speakError { font-size: 10px; line-height: 16px; color: var(--dsw-alias-state-error-primary, #f85149); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.headerToggle { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; }
+.headerToggle:hover { background: var(--dsw-alias-interactive-bg-hover-solid, var(--dsw-alias-interactive-bg-hover)); }
+.toggleDot { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; pointer-events: none; }

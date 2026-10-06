@@ -1,12 +1,15 @@
 /**
- * Host half of @martin/dsh-voice: the metrics sink.
+ * Host half of @martin/dsh-voice.
  *
- * The browser voice UI (src/client/metrics.ts) forwards one entry per
- * completed voice turn; each entry is appended as a JSON line to
- * ~/.dsh/logs/voice-metrics.log, where the numbers behind "the phone feels
- * slow" can be analysed afterwards.
+ * Two services are provided to the browser:
+ *  - voiceMetrics: one JSON line per completed voice turn, appended to
+ *    ~/.dsh/logs/voice-metrics.log, so the numbers behind "the phone feels
+ *    slow" can be analysed afterwards;
+ *  - tts (src/tts-host.ts): per-message speech synthesis for the speaker
+ *    buttons, supervised on the machine running DSH.
  */
 import { appendFileSync } from 'node:fs'
+import { TtsController } from './tts-host.ts'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -47,4 +50,5 @@ interface HostContext {
 
 export function apply(ctx: HostContext): void {
   ctx.provide('voiceMetricsController', new VoiceMetricsController())
+  ctx.provide('ttsController', new TtsController())
 }

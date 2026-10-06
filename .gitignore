@@ -1,5 +1,6 @@
 node_modules/
 *.log
 .dsh/
+lib/
 
 tests/sim-trace-*.jsonl
