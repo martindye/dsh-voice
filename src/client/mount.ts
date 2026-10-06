@@ -13,6 +13,7 @@ import { setMetricsSink } from './metrics.ts'
 import { Recording } from './audio.ts'
 import { en, NS, zh } from './locales.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
+import { armPageAudioUnlock } from './audio-unlock.ts'
 import { observeReadiness } from './readiness.ts'
 import { VoicePreparation } from './PreparationCard.tsx'
 import { VoiceSetupPrompt } from './VoiceSetupPrompt.tsx'
@@ -131,6 +132,9 @@ function registerUi(ctx: Context): void {
  * @returns disposer joining UI and Remote withdrawal.
  */
 export async function mountVoiceInput(ctx: Context, contribution: TypertRemoteContribution): Promise<() => Promise<void>> {
+  // Safari locks page audio until a real touch; the voice composer is the
+  // first thing touched, so take the unlock on behalf of the whole page.
+  armPageAudioUnlock()
   const disposeRemote = await ctx.remote.$mount(contribution)
   const disposeMetrics = await ctx.remote.$mount(METRICS_REMOTE as unknown as TypertRemoteContribution)
   setMetricsSink((entry) => {
