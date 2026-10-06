@@ -17,8 +17,9 @@
  *  - I3: when the system starts speaking during an auto-opened
  *    microphone, there is exactly one designed handover per reply
  *    (recording -> speaking-stop-square -> recording), never a bare idle.
- *  - I4: the mute is a permanent member of the row — present in every state
- *    and its state persists across turns (a muted microphone opens muted).
+ *  - I4: the mute joins the row only during a voice conversation — it takes
+ *    the dictate button's place and never appears with the dictate — and the
+ *    default row (dictate + voice) returns when the conversation ends.
  */
 import { writeFileSync } from 'node:fs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -423,25 +424,24 @@ it('exits speech mode on stop: the default row returns and the mic does not reop
   printTrace(currentTest)
 }, 60000)
 
-it('keeps the mute in every state and persists its state across turns', async () => {
+it('the mute joins the row only during a voice conversation', async () => {
   const s = makeSim()
-  currentTest = 'mute-always-present'
+  currentTest = 'mute-in-conversation-only'
   watch(s.container, 'mount')
 
-  // The default row (dictate + waveform) already carries the mute.
-  expect(probe(s.container).mute).toBe('muteMic')
+  // The default row before a conversation: dictate + voice entry, no mute.
+  expect(probe(s.container).mute).toBe('none')
   expect(s.container.querySelector('button[aria-label="start"]')).toBeTruthy()
 
-  // Muting while idle flips the button to the muted state.
-  s.tapMute()
-  watch(s.container, 'muted idle')
-  expect(probe(s.container).mute).toBe('unmuteMic')
-
-  // A new turn honours the persistent state: the microphone opens muted.
+  // The conversation starts: the mute takes the dictate button's place.
   await startTurn(s)
-  expect(s.capture.setMuted).toHaveBeenCalledWith(true)
+  expect(probe(s.container).mute).toBe('muteMic')
+  expect(s.container.querySelector('button[aria-label="start"]')).toBeNull()
 
-  // And it is genuinely quiet: speaking into a muted microphone sends nothing.
+  // Mute while recording: the microphone is genuinely quiet.
+  s.tapMute()
+  watch(s.container, 'muted recording')
+  expect(probe(s.container).mute).toBe('unmuteMic')
   await speak(s)
   await sleep(2600) // well past the 2 s silence window
   expect(s.inputActions.submit).not.toHaveBeenCalled()
@@ -449,19 +449,26 @@ it('keeps the mute in every state and persists its state across turns', async ()
   // Unmute and finish the turn the ordinary way.
   s.tapMute()
   expect(probe(s.container).mute).toBe('muteMic')
-  expect(s.capture.setMuted).toHaveBeenLastCalledWith(false)
   await speak(s)
   await waitSubmitted(s)
 
-  // The mute is still there while the agent works — and when it finishes.
+  // The pending reply shows the stop square; the mute holds its place.
+  await s.waitForPrimary('stopGenerating')
+  watch(s.container, 'turn pending')
+  expect(probe(s.container).mute).toBe('muteMic')
+
+  // The session reports the turn running: the square and the mute stay.
   s.snapshot.running = true; s.rerender()
   await s.waitForPrimary('stopGenerating')
   watch(s.container, 'agent running')
   expect(probe(s.container).mute).toBe('muteMic')
 
+  // End the conversation: the default row returns and the mute leaves with it.
+  s.tapUnified()
   s.snapshot.running = false; s.rerender()
   await s.waitForPrimary('voiceChat.start')
-  expect(probe(s.container).mute).toBe('muteMic')
+  expect(s.container.querySelector('button[aria-label="start"]')).toBeTruthy()
+  expect(probe(s.container).mute).toBe('none')
 
   printTrace(currentTest)
 }, 60000)
