@@ -4,6 +4,7 @@ import { Button, DisclosureRow, IconChevronDownOutlineRegular, StateDot, type St
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SpeechPreparationState, SpeechProviderId, SpeechProviderView, SpeechSelectionPatch } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
 import type { VoiceInputInjected } from './VoiceInput.tsx'
+import { setSpeechEngine, ttsStatus, type VoiceEngineChoice } from './tts.ts'
 import { NS } from './locales.ts'
 import css from './VoiceInput.module.css'
 
@@ -141,6 +142,21 @@ export function VoicePreparation({ useSpeechReadiness, ...props }: Pick<InjectFa
   const languageNames: Readonly<Record<string, string>> = {
     auto: props.t('auto'), zh: props.t('zh'), en: props.t('en'), yue: props.t('yue'), ja: props.t('ja'), ko: props.t('ko'),
   }
+  const [voiceEngine, setVoiceEngine] = useState<VoiceEngineChoice>(ttsStatus().engine === 'qwen3ggufbase' ? 'qwen3' : 'pocket')
+  const [voiceBusy, setVoiceBusy] = useState(false), [voiceNote, setVoiceNote] = useState('')
+  const changeVoice = async (engine: VoiceEngineChoice) => {
+    setVoiceBusy(true); setVoiceNote('')
+    try {
+      const result = await setSpeechEngine(engine)
+      setVoiceEngine(engine)
+      setVoiceNote(result.gpu === 'starting' ? props.t('voiceGpuStarting')
+        : result.gpu === 'up' ? props.t('voiceGpuReady')
+        : result.gpu === 'starter-missing' ? props.t('voiceGpuUnavailable')
+        : props.t('voiceCpuReady'))
+    } catch (failure) {
+      setVoiceNote(failure instanceof Error ? failure.message : String(failure))
+    } finally { setVoiceBusy(false) }
+  }
   return <div>
     {catalog && <div className={css.preferences}>
       <label>{props.t('provider')}<select value={catalog.selection.providerId} disabled={!readiness.connected || saving}
@@ -152,6 +168,12 @@ export function VoicePreparation({ useSpeechReadiness, ...props }: Pick<InjectFa
         {selected?.languages.map(language =>
           <option key={language} value={language}>{languageNames[language] ?? language}</option>)}
       </select></label>
+      <label>{props.t('speakingVoice')}<select value={voiceEngine} disabled={voiceBusy}
+        onChange={(event) => { void changeVoice(event.target.value as VoiceEngineChoice) }}>
+        <option value="pocket">{props.t('voiceCpu')}</option>
+        <option value="qwen3">{props.t('voiceGpu')}</option>
+      </select></label>
+      {voiceNote && <small className={css.metric} role="status">{voiceNote}</small>}
       <p>{props.t(selected?.location === 'cloud' ? 'cloud' : 'local')}</p>
       {error && <p role="alert">{props.t('failed', { message: error })}</p>}
     </div>}

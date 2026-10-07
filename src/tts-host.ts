@@ -15,7 +15,7 @@
  *    consent.json), defaulting to the GPU voice when its model is present.
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -75,10 +75,28 @@ function readConsent(): Consent | null {
 }
 
 /** The consented engine, or the best ready one (GPU first, CPU fallback). */
+/** The consented engine, or the best ready one (GPU first, CPU fallback).
+ *  Maps the consent keys to the TTS server's registry names. */
 function selectedEngine(): string {
   const consent = readConsent()
-  if (consent?.engine === 'qwen3' || consent?.engine === 'pocket') return consent.engine
-  return qwenModelReady() ? 'qwen3' : 'pocket'
+  if (consent?.engine === 'qwen3') return 'qwen3ggufbase'
+  if (consent?.engine === 'pocket') return 'pocket'
+  return qwenModelReady() ? 'qwen3ggufbase' : 'pocket'
+}
+
+/**
+ * The GPU voice chain (tts-gate on 8095 fronting CosyVoice on 8097) is a
+ * user OPT-IN, not an auto-start: it takes real VRAM from the LLM. The
+ * starter script is idempotent and reuses a live chain.
+ */
+const GPU_STARTER = process.env.DSH_VOICE_GPU_STARTER
+  ?? path.join(os.homedir(), '.dsh', 'tts-gate', 'start-tts-gate.ps1')
+
+async function gpuChainUp(): Promise<boolean> {
+  try {
+    const r = await fetch('http://127.0.0.1:8095/v1/models', { signal: AbortSignal.timeout(2500) })
+    return r.ok
+  } catch { return false }
 }
 
 /* ------------------------------------------------------------------ */
@@ -290,7 +308,35 @@ class TtsController {
       up = await fetchHealth()
       if (up) { healthOk = true; lastHealthAt = Date.now() }
     }
-    return { ok: true, server: up ? 'up' : 'off', engine: selectedEngine(), python: pythonProbeCommand() !== null }
+    const gpu = await gpuChainUp()
+    return { ok: true, server: up ? 'up' : 'off', engine: selectedEngine(), python: pythonProbeCommand() !== null, gpu }
+  }
+
+  /**
+   * The user's voice choice. 'pocket' = small CPU voice (default; no GPU);
+   * 'qwen3' = the GPU voice — starts the GPU chain on demand (3-5 min load)
+   * and never auto-restarts it. The choice persists in the shared consent
+   * file and is read per request.
+   */
+  async setEngine(engine: 'pocket' | 'qwen3') {
+    if (engine !== 'pocket' && engine !== 'qwen3') throw new Error(`unknown voice choice: ${String(engine)}`)
+    mkdirSync(path.dirname(CONSENT_FILE), { recursive: true })
+    writeFileSync(CONSENT_FILE, JSON.stringify({ engine }), 'utf8')
+    log(`voice choice: ${engine}`)
+    let gpu: 'not-requested' | 'up' | 'starting' | 'starter-missing' = 'not-requested'
+    if (engine === 'qwen3') {
+      if (await gpuChainUp()) gpu = 'up'
+      else if (existsSync(GPU_STARTER)) {
+        spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', GPU_STARTER],
+          { windowsHide: true, detached: true, stdio: 'ignore' }).unref()
+        log('gpu voice chain starter launched')
+        gpu = 'starting'
+      } else {
+        log(`gpu starter missing: ${GPU_STARTER}`)
+        gpu = 'starter-missing'
+      }
+    }
+    return { ok: true, engine, gpu }
   }
 
   /** Render one finalized assistant message to a base64 WAV. */
@@ -330,6 +376,7 @@ Object.defineProperty(TtsController.prototype, REMOTE_METHODS_KEY, {
     methods: Object.freeze([
       { method: 'status', invocation: { kind: 'direct' } },
       { method: 'synthesize', invocation: { kind: 'direct' } },
+      { method: 'setEngine', invocation: { kind: 'direct' } },
     ]),
   }),
 })

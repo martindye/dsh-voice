@@ -48,12 +48,26 @@ export const TTS_REMOTE = {
       cancellation: { parameter: 'signal' },
       result: passThroughCodec('@martin/dsh-voice#SynthesizeResult'),
     },
+    {
+      id: '@martin/dsh-voice#tts/setEngine',
+      service: 'ttsController',
+      namespace: 'tts',
+      method: 'setEngine',
+      invocation: { kind: 'direct' },
+      parameters: [
+        { name: 'engine', wire: 'engine', source: 'json', codec: passThroughCodec('@martin/dsh-voice#EngineChoice') },
+      ],
+      result: passThroughCodec('@martin/dsh-voice#EngineChoiceResult'),
+    },
   ],
 } as const
+
+export type VoiceEngineChoice = 'pocket' | 'qwen3'
 
 interface TtsNamespace {
   status(): Promise<unknown>
   synthesize(request: { sessionId: string; messageId: string; auto: boolean }, signal?: unknown): Promise<unknown>
+  setEngine(engine: VoiceEngineChoice): Promise<unknown>
 }
 
 let ns: TtsNamespace | null = null
@@ -276,4 +290,28 @@ export function speakNow(sessionId: string, messageId: string): void {
   unlockPageAudio()
   if (isPlaying()) { stopPlayback(); return }
   void speak(sessionId, messageId, { auto: false })
+}
+
+/* ------------------------------------------------- voice engine choice */
+
+export interface EngineChoiceResult {
+  engine: VoiceEngineChoice
+  /** 'up' | 'starting' | 'starter-missing' | 'not-requested' */
+  gpu: string
+}
+
+/**
+ * Persist the user's speaking-voice choice on the host. 'qwen3' is the GPU
+ * voice: the host starts its chain on demand (3-5 min load) and it never
+ * auto-restarts. 'pocket' is the small CPU voice (the default).
+ */
+export async function setSpeechEngine(engine: VoiceEngineChoice): Promise<EngineChoiceResult> {
+  if (!ns || typeof ns.setEngine !== 'function') throw new Error('tts remote not ready (page reload needed?)')
+  const r = (await ns.setEngine(engine)) as
+    | { ok?: boolean; value?: { engine?: string; gpu?: string }; error?: { message?: string } }
+    | { engine?: string; gpu?: string }
+  const envelope = r && typeof r === 'object' && 'ok' in r ? r : { ok: true, value: r }
+  if (!envelope.ok) throw new Error(envelope.error?.message ?? 'engine change failed')
+  const value = (envelope.value ?? {}) as { engine?: string; gpu?: string }
+  return { engine: (value.engine as VoiceEngineChoice) ?? engine, gpu: value.gpu ?? 'not-requested' }
 }

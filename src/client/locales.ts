@@ -110,6 +110,13 @@ export const zh = {
   autovoice: '切换自动朗读',
   'autovoice.on': '自动朗读已开启：新回复在本设备自动朗读',
   'autovoice.off': '自动朗读已关闭（本设备）',
+  speakingVoice: '朗读声音',
+  voiceCpu: 'CPU 小声音（默认，不占显卡）',
+  voiceGpu: 'GPU 高质量声音',
+  voiceCpuReady: '已切换到 CPU 小声音。',
+  voiceGpuReady: 'GPU 高质量声音已就绪。',
+  voiceGpuStarting: '正在启动 GPU 声音（约 3-5 分钟）；就绪前仍用 CPU 小声音。',
+  voiceGpuUnavailable: '未找到 GPU 声音的启动程序，无法切换。',
 } as const
 
 /** Keys accepted by the voice input translator. */
@@ -222,6 +229,13 @@ export const en: Record<VoiceKey, string> = {
   autovoice: 'Toggle auto-read',
   'autovoice.on': 'Auto-read on: fresh replies are read aloud on this device',
   'autovoice.off': 'Auto-read off for this device',
+  speakingVoice: 'Speaking voice',
+  voiceCpu: 'Small CPU voice (default, no GPU)',
+  voiceGpu: 'GPU voice (higher quality)',
+  voiceCpuReady: 'Switched to the CPU voice.',
+  voiceGpuReady: 'The GPU voice is ready.',
+  voiceGpuStarting: 'Starting the GPU voice (3-5 minutes); the CPU voice speaks until it is ready.',
+  voiceGpuUnavailable: 'The GPU voice starter was not found on this machine.',
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
