@@ -11,5 +11,12 @@ export { inject } from './mount.ts'
  * @returns complete UI and Remote disposer.
  */
 export async function apply(ctx: Context): Promise<() => Promise<void>> {
-  return await mountVoiceInput(ctx, speechRemote)
+  try {
+    return await mountVoiceInput(ctx, speechRemote)
+  } catch (error) {
+    // Surface the real boot failure in the page console (the loader only
+    // reports "failed" for a failed entry, which is otherwise opaque).
+    console.error('DSH_VOICE_APPLY_ERR', error)
+    throw error
+  }
 }

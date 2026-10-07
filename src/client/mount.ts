@@ -50,6 +50,16 @@ const METRICS_REMOTE = {
 } as const
 
 /**
+ * The plugin's own Remotes (voice metrics + TTS output) share one package,
+ * and the typert registry rejects a second registration of the same package:
+ * they mount as a single contribution.
+ */
+const VOICE_REMOTE = {
+  package: METRICS_REMOTE.package,
+  descriptors: [...METRICS_REMOTE.descriptors, ...TTS_REMOTE.descriptors],
+} as unknown as TypertRemoteContribution
+
+/**
  * The unified activity-slot button takes over the composer's send/stop control,
  * so retire the native primary button. Matching is by the host's own labels;
  * on a non-English host the labels differ and the native button simply stays.
@@ -152,21 +162,23 @@ export async function mountVoiceInput(ctx: Context, contribution: TypertRemoteCo
   // first thing touched, so take the unlock on behalf of the whole page.
   armPageAudioUnlock()
   const disposeRemote = await ctx.remote.$mount(contribution)
-  const disposeMetrics = await ctx.remote.$mount(METRICS_REMOTE as unknown as TypertRemoteContribution)
-  const disposeTts = await ctx.remote.$mount(TTS_REMOTE as unknown as TypertRemoteContribution)
-  setTtsRemote(ctx.remote)
+  const disposeVoice = await ctx.remote.$mount(VOICE_REMOTE)
+  // The Remote proxy gates namespace property access by inject declaration;
+  // this fiber declares only 'remote', so take the service-key lookups for
+  // our own namespaces here, once, and hold the references.
+  const ttsNs = ctx.get('remote.tts') as { status?: () => Promise<unknown> } | undefined
+  const metricsNs = ctx.get('remote.voiceMetrics') as { log?: (entry: Record<string, unknown>) => unknown } | undefined
+  setTtsRemote({ tts: ttsNs })
   setMetricsSink((entry) => {
     try {
-      const ns = (ctx.remote as unknown as { voiceMetrics?: { log?: (entry: Record<string, unknown>) => unknown } }).voiceMetrics
-      void Promise.resolve(ns?.log?.(entry)).catch(() => { /* metrics never break the voice path */ })
+      void Promise.resolve(metricsNs?.log?.(entry)).catch(() => { /* metrics never break the voice path */ })
     } catch { /* ditto */ }
   })
   // Keep the output status (server up/down, active engine) fresh for the
   // header toggle's tooltip; the host starts the server lazily on demand.
   const pollTtsStatus = () => {
     try {
-      const ns = (ctx.remote as unknown as { tts?: { status?: () => Promise<unknown> } }).tts
-      void ns?.status?.().then((r) => {
+      void ttsNs?.status?.().then((r) => {
         const out = r && typeof r === 'object' && 'ok' in (r as object)
           ? (r as { value?: unknown }).value
           : r
@@ -177,6 +189,6 @@ export async function mountVoiceInput(ctx: Context, contribution: TypertRemoteCo
   void pollTtsStatus()
   const statusTimer = setInterval(pollTtsStatus, 25_000)
   const ui = ctx.inject(['remote.speech', 'sessions', 'slots', 'locale', 'pluginNavigation'], registerUi)
-  try { await ui } catch (error) { await ui.dispose(); await disposeRemote(); await disposeMetrics(); await disposeTts(); throw error }
-  return async () => { clearInterval(statusTimer); await ui.dispose(); await disposeRemote(); await disposeMetrics(); await disposeTts() }
+  try { await ui } catch (error) { await ui.dispose(); await disposeRemote(); await disposeVoice(); throw error }
+  return async () => { clearInterval(statusTimer); await ui.dispose(); await disposeRemote(); await disposeVoice() }
 }
