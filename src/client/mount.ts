@@ -95,7 +95,7 @@ function registerUi(ctx: Context): void {
   ctx.effect(() => readiness.dispose)
   ctx.effect(() => async () => { await Promise.all([...recordings].map(recording => recording.dispose())) })
   const actions: VoiceInputInjected = {
-    openSettings: () => { ctx.pluginNavigation.openBundle('@deepseek-ai/dsh-experimental-voice-input-bundle') },
+    openSettings: () => { ctx.pluginNavigation.openBundle('@martin/dsh-voice') },
     stopTurn: (sessionId: SessionId) => {
       // Preferred: the app's own stop button. It stays in the DOM while a
       // turn runs (the unified-button CSS only hides it) and is wired to the
@@ -129,11 +129,13 @@ function registerUi(ctx: Context): void {
   ctx.slots.inject('conversation.input.activity', () => ctx.slots.register({
     name: 'conversation.input.activity', locale: NS, inject: () => actions,
   }, VoiceInput))
+  // The Plugins page dispatches these keyed slots by the installed bundle's
+  // package name, so the cards register under this plugin's own name.
   ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({ name: 'plugins.bundle.config',
-    key: '@deepseek-ai/dsh-experimental-voice-input-bundle', locale: NS, inject: () => actions,
+    key: '@martin/dsh-voice', locale: NS, inject: () => actions,
   }, VoicePreparation))
   ctx.slots.inject('plugins.bundle.activation', () => ctx.slots.register({ name: 'plugins.bundle.activation',
-    key: '@deepseek-ai/dsh-experimental-voice-input-bundle', locale: NS, inject: () => actions,
+    key: '@martin/dsh-voice', locale: NS, inject: () => actions,
   }, VoiceSetupPrompt))
   // Output side: a speaker button on each finalized assistant message and a
   // per-device auto-read toggle in the session header corner.
