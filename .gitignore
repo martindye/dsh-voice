@@ -4,3 +4,6 @@ node_modules/
 lib/
 
 tests/sim-trace-*.jsonl
+
+__pycache__/
+*.pyc
