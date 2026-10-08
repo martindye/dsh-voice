@@ -15,7 +15,8 @@
  *    consent.json), defaulting to the GPU voice when its model is present.
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,12 +37,49 @@ const MODEL_ROOT = path.join(os.homedir(), '.dsh', 'voice-chat', 'models')
 const LOG_FILE = path.join(os.homedir(), '.dsh', 'logs', 'voice-tts.log')
 const FRESH_WINDOW_MS = 2 * 60_000
 const TTS_MAX_CHARS = 4000
+const CACHE_DIR = path.join(os.homedir(), '.dsh', 'voice-chat', 'tts-cache')
+const CACHE_MAX = 10
 
 function log(message: string): void {
   try {
     mkdirSync(path.dirname(LOG_FILE), { recursive: true })
     appendFileSync(LOG_FILE, `[dsh-voice tts] ${new Date().toISOString()} ${message}\n`, 'utf8')
   } catch { /* the log must never break speech */ }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reply cache: one text + engine pair is rendered once; every other   */
+/* device or repeat replays the stored WAV. Oldest entries are killed  */
+/* beyond CACHE_MAX, so the cache is small and disposable by design.   */
+/* ------------------------------------------------------------------ */
+
+function cacheKey(prepared: string, engine: string): string {
+  return createHash('sha256').update(`${engine}\n${prepared}`, 'utf8').digest('hex')
+}
+
+function cacheGet(key: string): Buffer | null {
+  try {
+    const file = path.join(CACHE_DIR, `${key}.wav`)
+    if (existsSync(file)) return readFileSync(file)
+  } catch { /* a broken cache entry is a miss, never an error */ }
+  return null
+}
+
+function cachePut(key: string, wav: Buffer): void {
+  try {
+    mkdirSync(CACHE_DIR, { recursive: true })
+    const file = path.join(CACHE_DIR, `${key}.wav`)
+    const tmp = `${file}.tmp`
+    writeFileSync(tmp, wav)
+    renameSync(tmp, file)
+    const entries = readdirSync(CACHE_DIR)
+      .filter((n) => n.endsWith('.wav'))
+      .map((n) => ({ n, mtime: statSync(path.join(CACHE_DIR, n)).mtimeMs }))
+      .sort((a, b) => a.mtime - b.mtime)
+    for (const { n } of entries.slice(0, Math.max(0, entries.length - CACHE_MAX))) {
+      try { unlinkSync(path.join(CACHE_DIR, n)) } catch { /* best effort */ }
+    }
+  } catch { /* the cache must never break speech */ }
 }
 
 /* ------------------------------------------------------------------ */
@@ -360,12 +398,19 @@ class TtsController {
       }
     }
 
-    await ensureServer()
     const engine = selectedEngine()
+    const key = cacheKey(prepared, engine)
+    const cached = cacheGet(key)
+    if (cached) {
+      log(`cache hit: ${prepared.length} chars (engine ${engine}, wav ${cached.length} bytes)`)
+      return { audioBase64: cached.toString('base64'), elapsedMs: 0, engine, cached: true }
+    }
+    await ensureServer()
     const started = Date.now()
     const wav = await renderWav(prepared, { engine })
     const elapsedMs = Date.now() - started
     log(`synthesize ok: ${prepared.length} chars in ${elapsedMs}ms (engine ${engine}, wav ${wav.length} bytes)`)
+    cachePut(key, wav)
     return { audioBase64: wav.toString('base64'), elapsedMs, engine }
   }
 }
