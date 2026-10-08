@@ -52,9 +52,18 @@ export class Recording {
   private analyser: AnalyserNode | undefined
   private samples = new Float32Array(256)
   private chunks: { blob: Blob; at: number }[] = []
+  private lastChunkAt = 0
   private muted = false
   private readonly lifetime = new AbortController()
   private disposal: Promise<void> | undefined
+
+  /**
+   * Whether the recorder has delivered real microphone data since then.
+   * Unlike the analyser, this is independent of the AudioContext state, so
+   * it stays true even when iOS keeps the context suspended and the level
+   * meter reads a live microphone as silence.
+   */
+  hasAudioSince(when: number): boolean { return this.lastChunkAt > when }
 
   constructor(private readonly onDispose: () => void) {}
 
@@ -83,12 +92,20 @@ export class Recording {
     this.stream = stream
     try {
       this.context = new AudioContext()
+      // iOS regularly leaves a fresh AudioContext suspended; a suspended
+      // context delivers nothing to the analyser, so the level meter reads
+      // a live microphone as silence. Resume explicitly in the gesture.
+      if (this.context.state !== 'running') { try { await this.context.resume() } catch { /* the recorder does not depend on the context */ } }
       this.analyser = this.context.createAnalyser()
       this.analyser.fftSize = this.samples.length
       this.context.createMediaStreamSource(stream).connect(this.analyser)
       this.recorder = new MediaRecorder(stream)
       this.recorder.ondataavailable = (event) => {
-        if (this.lifetime.signal.aborted || this.muted || event.data.size === 0) return
+        if (this.lifetime.signal.aborted || event.data.size === 0) return
+        // The mic is alive whenever real data arrives, muted or not: this
+        // stays true even while the analyser is blind (suspended context).
+        this.lastChunkAt = Date.now()
+        if (this.muted) return
         const now = Date.now()
         this.chunks.push({ blob: event.data, at: now })
         // Age the buffer: anything that has sat here past the freshness
@@ -102,7 +119,10 @@ export class Recording {
           console.error('Speech recording error handler failed', error)
         }
       }
-      this.recorder.start()
+      // A timeslice makes data flow during the recording; without one some
+      // engines deliver it only at stop(), which would blind the freshness
+      // ageing and the mic-alive fallback below.
+      this.recorder.start(500)
     } catch (error) { await this.dispose(); throw error }
   }
 

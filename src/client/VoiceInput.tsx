@@ -446,6 +446,15 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
       if (focusPaused.current) return // focus lost: the window is away, freeze the clocks
       const now = Date.now()
       if (active.vadStart === undefined) active.vadStart = now
+      // The level meter reads through the AudioContext, which iOS can keep
+      // suspended; a suspended context reads a live microphone as silence.
+      // Recorder data is the ground truth that the mic is alive, so a mic
+      // that keeps delivering audio is never abandoned as "no speech".
+      if (active.capture.hasAudioSince(active.vadLastVoice ?? active.vadStart)) {
+        if (active.vadHeardAt === undefined) active.vadHeardAt = now
+        active.vadLastVoice = now
+        return
+      }
       if (active.capture.amplitude() >= VOICE_RMS) {
         if (active.vadHeardAt === undefined) active.vadHeardAt = now
         active.vadLastVoice = now
