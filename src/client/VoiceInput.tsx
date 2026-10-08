@@ -516,15 +516,20 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
       onClick={toggleMute}><MicMutedGlyph /></Button></span>
   )
   if (phase === 'requesting' || phase === 'recording' || phase === 'transcribing') {
-    const label = phase === 'recording' ? t('voiceChat.stop') : phase === 'requesting' ? t('cancel') : t('transcribingShort')
+    // The button stays live in every phase: a press cancels a pending
+    // permission request or a transcription in flight. Disabled while
+    // transcribing it read grey ("stuck, nothing will happen") in the gap
+    // before a reply starts — the words are final by then, so cancelling is
+    // always safe and cheap.
+    const label = phase === 'recording' ? t('voiceChat.stop') : t('cancel')
     return (
       <span className={css.voiceChatPair} ref={cardRef}>
         {muteButton}
         <Tooltip label={label} side="top" portal>
           <span className={css.triggerAnchor}><Button type="button" className={`${css.voiceChat} ${css.voiceChatOn}`} size="sm"
-            aria-label={label} aria-busy={phase === 'transcribing'} disabled={phase === 'transcribing'}
+            aria-label={label}
             onMouseDown={(event) => { event.preventDefault() }}
-            onClick={() => { if (phase === 'requesting') cancel(); else if (phase === 'recording') void finish() }}>
+            onClick={() => { if (phase === 'recording') void finish(); else cancel() }}>
             {phase === 'transcribing' ? <StateDot state="ongoing" /> : phase === 'recording' ? <CloseGlyph /> : <VoiceChatGlyph />}</Button></span>
         </Tooltip>
       </span>
