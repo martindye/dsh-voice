@@ -42,7 +42,10 @@ const CACHE_DIR = path.join(os.homedir(), '.dsh', 'voice-chat', 'tts-cache')
 // Sentence-level entries are small and repeat a lot ("Give me the go."), so
 // the cap is generous; each entry is one short WAV (~100-300 KB).
 const CACHE_MAX = 50
-const RENDER_MAX_CHARS = 2000
+// One render call may carry a whole message's worth of text: the client can
+// join the entire (4000-char-capped) prepared message into one block, so the
+// guard matches the message cap, not the old single-sentence size.
+const RENDER_MAX_CHARS = 4000
 
 function log(message: string): void {
   try {

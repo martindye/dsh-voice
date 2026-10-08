@@ -13,7 +13,7 @@ vi.mock('../src/client/audio-unlock.ts', () => ({
   unlockPageAudio: () => { /* the tests need no gesture unlock */ },
 }))
 
-import { isPlaying, setTtsRemote, speak, stopPlayback } from '../src/client/tts.ts'
+import { isPlaying, loadRenderSpeed, noteRenderSample, setTtsRemote, speak, stopPlayback } from '../src/client/tts.ts'
 
 const B64 = Buffer.from('RIFFfake').toString('base64')
 
@@ -66,6 +66,7 @@ function fakeRemote(sentences: string[], renderDelay = 0) {
 
 beforeEach(() => {
   stopPlayback()
+  localStorage.clear()
 })
 
 describe('sentence pipeline', () => {
@@ -160,5 +161,42 @@ describe('sentence pipeline', () => {
     expect(outcome).toEqual({ stale: true })
     expect(fake.renders).toHaveLength(0)
     expect(isPlaying()).toBe(false)
+  })
+
+  it('folds a gapping follow-on into one render block', async () => {
+    const ctx = makeCtx()
+    holder.ctx = ctx
+    const fake = fakeRemote(['A.', 'A considerably longer sentence follows.'])
+    setTtsRemote({ tts: fake.remote } as never)
+
+    const outcome = await speak('s5', 'm5')
+    expect(outcome).toEqual({ audio: true })
+    await vi.waitFor(() => {
+      expect(ctx.started.length).toBe(1)
+    }, { timeout: 3000, interval: 10 })
+    // One clip, not two: the follow-on would still have been rendering
+    // while 'A.' had already finished, so the two render as one clip.
+    expect(fake.renders).toHaveLength(1)
+    expect(fake.renders[0]?.text).toBe('A. A considerably longer sentence follows.')
+    stopPlayback()
+  })
+})
+
+describe('render-speed calibration', () => {
+  it('assumes 2.5 until the first measured render lands', () => {
+    expect(loadRenderSpeed()).toBe(2.5)
+  })
+
+  it('stores the first clean sample outright, then blends toward later ones', () => {
+    noteRenderSample(2, 0.8) // sample 2.5, first-ever: stored outright
+    expect(loadRenderSpeed()).toBe(2.5)
+    noteRenderSample(2, 0.5) // sample 4.0: blended 60/40 -> 3.1
+    expect(loadRenderSpeed()).toBeCloseTo(3.1, 5)
+  })
+
+  it('ignores cold-start and cache-hit renders', () => {
+    noteRenderSample(2, 40) // sample 0.05: model load, not a render
+    noteRenderSample(2, 0)  // cache hit: no render time at all
+    expect(loadRenderSpeed()).toBe(2.5)
   })
 })

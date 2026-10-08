@@ -9,6 +9,7 @@
  * (dsh.voice-chat.v1, armed by VoiceInput). Freshness is enforced on the
  * host (replies older than two minutes are skipped, not spoken).
  */
+import { sentenceBlocks } from '../sentences.ts'
 import { getSharedAudioContext, unlockPageAudio } from './audio-unlock.ts'
 
 /** Strict-codec pass-through (the bundle has no zod; the host runs raw JSON). */
@@ -250,16 +251,65 @@ function unwrapValue(result: unknown): { ok: true; value: Record<string, unknown
   return { ok: true, value: (r as Record<string, unknown>) ?? {} }
 }
 
+/* ------------------------------------------- render-speed calibration (T) */
+
+const SPEED_KEY = 'dsh-voice-output:render-speed'
+export const DEFAULT_RENDER_SPEED = 2.5
+const SPEED_MIN = 0.8
+const SPEED_MAX = 5
+
 /**
- * Play a sentence plan as a pipeline: sentences enter the host's render pipe
- * one at a time, and each one is decoded and scheduled back-to-back on the
+ * Calibrated render speed: audio-seconds per render-second, per machine.
+ * The TTS server's speed varies with the host CPU and load, so the value is
+ * stored after the first measured render and blends toward each fresh
+ * sample. Until a measurement exists the assumed 2.5 is used (normal
+ * behaviour can be assumed), so block-building works from the very first
+ * reply and refines itself from the second sentence onward.
+ */
+export function loadRenderSpeed(): number {
+  try {
+    const raw = localStorage.getItem(SPEED_KEY)
+    const n = raw === null ? NaN : Number(raw)
+    if (Number.isFinite(n) && n >= SPEED_MIN && n <= SPEED_MAX) return n
+  } catch { /* private mode etc. */ }
+  return DEFAULT_RENDER_SPEED
+}
+
+/**
+ * Fold one measured render (audio seconds vs render seconds) into the stored
+ * speed. First-ever sample sets it outright; later samples blend 60/40 so a
+ * single hiccup does not move it. Out-of-range samples (cold server load,
+ * cache hits, hiccups) are dropped.
+ */
+export function noteRenderSample(audioSeconds: number, renderSeconds: number): void {
+  if (!(audioSeconds > 0.2) || !(renderSeconds > 0.05)) return
+  const sample = audioSeconds / renderSeconds
+  if (sample < 0.5 || sample > 6) return
+  const clamped = Math.min(SPEED_MAX, Math.max(SPEED_MIN, sample))
+  let prev: number | null = null
+  try {
+    const raw = localStorage.getItem(SPEED_KEY)
+    const n = raw === null ? NaN : Number(raw)
+    if (Number.isFinite(n)) prev = n
+  } catch { /* best effort */ }
+  const next = prev === null
+    ? clamped
+    : Math.min(SPEED_MAX, Math.max(SPEED_MIN, 0.6 * prev + 0.4 * clamped))
+  try { localStorage.setItem(SPEED_KEY, String(next)) } catch { /* best effort */ }
+}
+
+/**
+ * Play a block plan as a pipeline: blocks enter the host's render pipe one
+ * at a time, and each one is decoded and scheduled back-to-back on the
  * shared AudioContext the moment it arrives. The engine renders faster than
- * real time, so the first sentence is spoken while the rest is still
- * rendering — the reply is heard as it is made, not after it is finished.
- * The returned promise settles when the FIRST sentence is scheduled (or the
+ * real time, so the first block is spoken while the rest is still rendering
+ * — the reply is heard as it is made, not after it is finished. Each block
+ * is speed-aware (see sentenceBlocks): a clip is never scheduled to finish
+ * before the one after it is rendered, so the voice does not run dry.
+ * The returned promise settles when the FIRST block is scheduled (or the
  * pipeline dies before that), which is when the "speaking" state becomes real.
  */
-function speakSentencesPipelined(sentences: string[], remote: TtsNamespace): Promise<void> {
+function speakSentencesPipelined(blocks: string[], remote: TtsNamespace): Promise<void> {
   stopPlayback() // kills any previous playback and its in-flight render
   const ac = getSharedAudioContext()
   if (!ac || ac.state === 'closed') {
@@ -287,15 +337,19 @@ function speakSentencesPipelined(sentences: string[], remote: TtsNamespace): Pro
     try {
       if (ac.state === 'suspended') await ac.resume()
       let nextStart = ac.currentTime + 0.08
-      for (let i = 0; i < sentences.length; i++) {
+      for (let i = 0; i < blocks.length; i++) {
         if (abort.signal.aborted) return
-        const rendered = unwrapValue(await remote.render({ text: sentences[i] }, abort.signal))
+        const rendered = unwrapValue(await remote.render({ text: blocks[i] }, abort.signal))
         if (abort.signal.aborted) return
         if (!rendered.ok) throw new Error(rendered.error)
         const b64 = rendered.value?.audioBase64
-        if (typeof b64 !== 'string' || !b64) throw new Error(`no audio for sentence ${i + 1}`)
+        if (typeof b64 !== 'string' || !b64) throw new Error(`no audio for block ${i + 1}`)
+        const renderMs = typeof rendered.value?.elapsedMs === 'number' ? (rendered.value.elapsedMs as number) : 0
         const bytes = decodeBase64(b64)
         const decoded = await ac.decodeAudioData(bytes.buffer.slice(0))
+        // Calibrate the render speed from what the host just reported, so
+        // the NEXT reply's blocks are cut for this machine.
+        noteRenderSample(decoded.duration, renderMs / 1000)
         if (abort.signal.aborted) return
         const src = ac.createBufferSource()
         src.buffer = decoded
@@ -378,10 +432,10 @@ export interface SpeakOutcome {
  * Speak one finalized assistant message. auto=true is the reply auto-read:
  * the host declines stale replies with { stale: true } instead of audio.
  *
- * Fast path: the host splits the reply into sentences (plan) and the client
- * pipelines one render per sentence, so the first words are heard while the
- * rest is still rendering. Fallback: one whole-message render (legacy host,
- * or no AudioContext on this device).
+ * Fast path: the host splits the reply into sentences (plan), the client
+ * groups them into speed-aware blocks and pipelines one render per block,
+ * so the first words are heard while the rest is still rendering.
+ * Fallback: one whole-message render (legacy host, or no AudioContext).
  */
 export async function speak(
   sessionId: string,
@@ -419,7 +473,11 @@ export async function speak(
       if (!opts.auto) emit()
       return { error: lastError }
     }
-    await speakSentencesPipelined(sentences, remote)
+    // Group into speed-aware blocks: a sentence that would still be
+    // rendering when the previous clip has finished plays inside the
+    // previous clip's block instead, so no gap can open between them.
+    const blocks = sentenceBlocks(sentences, loadRenderSpeed()).map((block) => block.join(' '))
+    await speakSentencesPipelined(blocks, remote)
     if (isPlaying()) return { audio: true }
     return lastError ? { error: lastError } : { audio: true }
   }

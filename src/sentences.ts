@@ -10,6 +10,35 @@
  *
  * Pure on purpose: the host (plan) and the tests share it.
  */
+/**
+ * Join sentences into render blocks at a calibrated render speed.
+ *
+ * The TTS engine renders `speed` times faster than real time, so a clip
+ * plays without a gap after it as long as its own render fits inside the
+ * PREVIOUS clip's playing time: next.length / speed <= current.length
+ * (both are proportional to speech duration). While that does not hold —
+ * the next sentence would still be rendering when the current one has
+ * finished — the next sentence is folded into the current block and the
+ * pair is rendered as one continuous clip. The first sentence that cannot
+ * gap starts the next block, and the walk continues from there.
+ */
+export function sentenceBlocks(sentences: string[], speed: number): string[][] {
+  const blocks: string[][] = []
+  let i = 0
+  while (i < sentences.length) {
+    const block: string[] = [sentences[i]]
+    let chars = sentences[i].length
+    i += 1
+    while (i < sentences.length && sentences[i].length > speed * chars) {
+      block.push(sentences[i])
+      chars += sentences[i].length
+      i += 1
+    }
+    blocks.push(block)
+  }
+  return blocks
+}
+
 export function splitSentences(text: string): string[] {
   const normalized = (text ?? '')
     .replace(/\.{3,}/g, ',')
