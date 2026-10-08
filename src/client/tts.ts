@@ -49,6 +49,30 @@ export const TTS_REMOTE = {
       result: passThroughCodec('@martin/dsh-voice#SynthesizeResult'),
     },
     {
+      id: '@martin/dsh-voice#tts/plan',
+      service: 'ttsController',
+      namespace: 'tts',
+      method: 'plan',
+      invocation: { kind: 'direct' },
+      parameters: [
+        { name: 'request', wire: 'request', source: 'json', codec: passThroughCodec('@martin/dsh-voice#PlanRequest') },
+      ],
+      cancellation: { parameter: 'signal' },
+      result: passThroughCodec('@martin/dsh-voice#PlanResult'),
+    },
+    {
+      id: '@martin/dsh-voice#tts/render',
+      service: 'ttsController',
+      namespace: 'tts',
+      method: 'render',
+      invocation: { kind: 'direct' },
+      parameters: [
+        { name: 'request', wire: 'request', source: 'json', codec: passThroughCodec('@martin/dsh-voice#RenderRequest') },
+      ],
+      cancellation: { parameter: 'signal' },
+      result: passThroughCodec('@martin/dsh-voice#RenderResult'),
+    },
+    {
       id: '@martin/dsh-voice#tts/setEngine',
       service: 'ttsController',
       namespace: 'tts',
@@ -64,9 +88,16 @@ export const TTS_REMOTE = {
 
 export type VoiceEngineChoice = 'pocket' | 'qwen3'
 
+/**
+ * The host's tts namespace. plan/render are runtime-checked (an old host
+ * simply does not have them); declared plainly because this bundle is the
+ * only caller of its own contract.
+ */
 interface TtsNamespace {
   status(): Promise<unknown>
   synthesize(request: { sessionId: string; messageId: string; auto: boolean }, signal?: unknown): Promise<unknown>
+  plan(request: { sessionId: string; messageId: string; auto: boolean }, signal?: unknown): Promise<unknown>
+  render(request: { text: string }, signal?: unknown): Promise<unknown>
   setEngine(engine: VoiceEngineChoice): Promise<unknown>
 }
 
@@ -126,6 +157,10 @@ export function isPlaying(): boolean {
 }
 
 export function stopPlayback(): void {
+  if (pipelineAbort) {
+    try { pipelineAbort.abort() } catch { /* already stopped */ }
+    pipelineAbort = null
+  }
   if (!currentAudio) return
   try { currentAudio.stop() } catch { /* already stopped */ }
   currentAudio = null
@@ -200,6 +235,105 @@ async function playB64(b64: string): Promise<void> {
   emit()
 }
 
+/* ------------------------------------------------ sentence pipeline (T) */
+
+/** Abort handle of the in-flight sentence pipeline, if any. */
+let pipelineAbort: AbortController | null = null
+
+/** Unwrap a remote result: bare value, or the {ok,value,error} envelope. */
+function unwrapValue(result: unknown): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  const r = result as { ok?: boolean; value?: unknown; error?: { message?: string } } | Record<string, unknown> | null
+  if (r && typeof r === 'object' && 'ok' in r) {
+    if (r.ok) return { ok: true, value: (r.value as Record<string, unknown>) ?? {} }
+    return { ok: false, error: r.error?.message ?? 'tts failed' }
+  }
+  return { ok: true, value: (r as Record<string, unknown>) ?? {} }
+}
+
+/**
+ * Play a sentence plan as a pipeline: sentences enter the host's render pipe
+ * one at a time, and each one is decoded and scheduled back-to-back on the
+ * shared AudioContext the moment it arrives. The engine renders faster than
+ * real time, so the first sentence is spoken while the rest is still
+ * rendering — the reply is heard as it is made, not after it is finished.
+ * The returned promise settles when the FIRST sentence is scheduled (or the
+ * pipeline dies before that), which is when the "speaking" state becomes real.
+ */
+function speakSentencesPipelined(sentences: string[], remote: TtsNamespace): Promise<void> {
+  stopPlayback() // kills any previous playback and its in-flight render
+  const ac = getSharedAudioContext()
+  if (!ac || ac.state === 'closed') {
+    lastError = 'audio is not ready on this device'
+    emit()
+    return Promise.resolve()
+  }
+  const abort = new AbortController()
+  pipelineAbort = abort
+  const sources: { stop: () => void }[] = []
+  let endTimer = 0
+  let firstScheduled: (() => void) | null = null
+  const firstSentence = new Promise<void>((resolve) => { firstScheduled = resolve })
+  const handle: PlaybackHandle = {
+    stop: () => {
+      try { abort.abort() } catch { /* already stopped */ }
+      for (const src of sources) { try { src.stop() } catch { /* ignore */ } }
+      window.clearTimeout(endTimer)
+      if (pipelineAbort === abort) pipelineAbort = null
+      if (currentAudio === handle) currentAudio = null
+      firstScheduled?.()
+    },
+  }
+  void (async () => {
+    try {
+      if (ac.state === 'suspended') await ac.resume()
+      let nextStart = ac.currentTime + 0.08
+      for (let i = 0; i < sentences.length; i++) {
+        if (abort.signal.aborted) return
+        const rendered = unwrapValue(await remote.render({ text: sentences[i] }, abort.signal))
+        if (abort.signal.aborted) return
+        if (!rendered.ok) throw new Error(rendered.error)
+        const b64 = rendered.value?.audioBase64
+        if (typeof b64 !== 'string' || !b64) throw new Error(`no audio for sentence ${i + 1}`)
+        const bytes = decodeBase64(b64)
+        const decoded = await ac.decodeAudioData(bytes.buffer.slice(0))
+        if (abort.signal.aborted) return
+        const src = ac.createBufferSource()
+        src.buffer = decoded
+        src.connect(ac.destination)
+        sources.push(src)
+        const startAt = Math.max(ac.currentTime + 0.02, nextStart)
+        src.start(startAt)
+        nextStart = startAt + decoded.duration
+        if (i === 0) {
+          currentAudio = handle
+          lastError = null
+          emit()
+          firstScheduled?.()
+          firstScheduled = null
+        }
+      }
+      // Keep the "speaking" state until the last sample has landed.
+      const endMs = Math.max(0, (nextStart - ac.currentTime) * 1000)
+      endTimer = window.setTimeout(() => {
+        if (currentAudio === handle) { currentAudio = null; emit() }
+      }, endMs + 150)
+    } catch (error) {
+      if (!abort.signal.aborted) {
+        lastError = webAudioBlocked(error)
+          ? blockedMessage()
+          : 'voice reply failed: ' + String((error as { message?: unknown })?.message ?? error)
+        if (currentAudio === handle) currentAudio = null
+        emit()
+      }
+    } finally {
+      if (pipelineAbort === abort) pipelineAbort = null
+      firstScheduled?.()
+      firstScheduled = null
+    }
+  })()
+  return firstSentence
+}
+
 /* ------------------------------------------------------- device choices */
 
 const AUTOMATIC_KEY = 'dsh-voice-output:autovoice'
@@ -243,13 +377,54 @@ export interface SpeakOutcome {
 /**
  * Speak one finalized assistant message. auto=true is the reply auto-read:
  * the host declines stale replies with { stale: true } instead of audio.
+ *
+ * Fast path: the host splits the reply into sentences (plan) and the client
+ * pipelines one render per sentence, so the first words are heard while the
+ * rest is still rendering. Fallback: one whole-message render (legacy host,
+ * or no AudioContext on this device).
  */
 export async function speak(
   sessionId: string,
   messageId: string,
   opts: { auto?: boolean } = {},
 ): Promise<SpeakOutcome> {
-  if (!ns || typeof ns.synthesize !== 'function') {
+  if (!ns) {
+    lastError = 'tts remote not ready (page reload needed?)'
+    if (!opts.auto) emit()
+    return { error: lastError }
+  }
+  if (typeof ns.plan === 'function' && typeof ns.render === 'function' && getSharedAudioContext()) {
+    const remote = ns
+    let plan: unknown
+    try {
+      plan = await remote.plan({ sessionId, messageId, auto: !!opts.auto })
+    } catch (error) {
+      lastError = String((error as { message?: unknown })?.message ?? error)
+      console.warn('[dsh-voice tts] plan failed:', error)
+      if (!opts.auto) emit()
+      return { error: lastError }
+    }
+    const planOut = unwrapValue(plan)
+    if (!planOut.ok) {
+      lastError = planOut.error
+      if (!opts.auto) emit()
+      return { error: lastError }
+    }
+    if (planOut.value.stale) return { stale: true }
+    const sentences = Array.isArray(planOut.value.sentences)
+      ? (planOut.value.sentences as unknown[]).filter((s): s is string => typeof s === 'string' && s.length > 0)
+      : []
+    if (sentences.length === 0) {
+      lastError = 'no speakable sentences'
+      if (!opts.auto) emit()
+      return { error: lastError }
+    }
+    await speakSentencesPipelined(sentences, remote)
+    if (isPlaying()) return { audio: true }
+    return lastError ? { error: lastError } : { audio: true }
+  }
+  // Legacy path: one whole-message render (old host, or no AudioContext).
+  if (typeof ns.synthesize !== 'function') {
     lastError = 'tts remote not ready (page reload needed?)'
     if (!opts.auto) emit()
     return { error: lastError }

@@ -21,6 +21,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as zlib from 'node:zlib'
+import { splitSentences } from './sentences.ts'
 
 const PLUGIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SERVER_PY = path.join(PLUGIN_DIR, 'tts', 'server.py')
@@ -38,7 +39,10 @@ const LOG_FILE = path.join(os.homedir(), '.dsh', 'logs', 'voice-tts.log')
 const FRESH_WINDOW_MS = 2 * 60_000
 const TTS_MAX_CHARS = 4000
 const CACHE_DIR = path.join(os.homedir(), '.dsh', 'voice-chat', 'tts-cache')
-const CACHE_MAX = 10
+// Sentence-level entries are small and repeat a lot ("Give me the go."), so
+// the cap is generous; each entry is one short WAV (~100-300 KB).
+const CACHE_MAX = 50
+const RENDER_MAX_CHARS = 2000
 
 function log(message: string): void {
   try {
@@ -413,6 +417,66 @@ class TtsController {
     cachePut(key, wav)
     return { audioBase64: wav.toString('base64'), elapsedMs, engine }
   }
+
+  /**
+   * Sentence plan for one finalized message: the prepared text split into
+   * sentences, NO audio. The client then pipelines one render() per sentence
+   * so the first words are heard while the rest is still being rendered
+   * (the engine renders ~2.5x faster than real time, so the pipe never
+   * starves). The freshness check lives here, once, not per sentence.
+   */
+  async plan(
+    request: { sessionId?: string; messageId?: string; auto?: boolean },
+    signal?: { throwIfAborted?: () => void },
+  ): Promise<Record<string, unknown>> {
+    signal?.throwIfAborted?.()
+    const sessionId = request?.sessionId
+    const messageId = request?.messageId
+    const auto = !!request?.auto
+    if (!sessionId || !messageId) throw new Error('plan requires sessionId and messageId')
+    const { text, time } = resolveMessage(sessionId, messageId)
+    let prepared = prepForSpeech(text)
+    if (!prepared) throw new Error('that message has no speakable text')
+    if (prepared.length > TTS_MAX_CHARS) prepared = `${prepared.slice(0, TTS_MAX_CHARS).trimEnd()}...`
+    if (auto) {
+      const ageMs = Date.now() - time
+      if (time > 0 && ageMs > FRESH_WINDOW_MS) {
+        log(`plan stale: age ${Math.round(ageMs / 1000)}s (auto)`)
+        return { stale: true, ageSeconds: Math.round(ageMs / 1000) }
+      }
+    }
+    const sentences = splitSentences(prepared)
+    log(`plan: message=${messageId} ${prepared.length} chars -> ${sentences.length} sentences (auto=${auto})`)
+    return { stale: false, sentences }
+  }
+
+  /**
+   * Render one prepared sentence (as returned by plan()) to a base64 WAV.
+   * Sentence-granular: repeat phrases across messages hit the cache.
+   */
+  async render(
+    request: { text?: string },
+    signal?: { throwIfAborted?: () => void },
+  ): Promise<Record<string, unknown>> {
+    signal?.throwIfAborted?.()
+    const sentence = (request?.text ?? '').trim()
+    if (!sentence) throw new Error('render requires text')
+    if (sentence.length > RENDER_MAX_CHARS) throw new Error('render text too long')
+    const engine = selectedEngine()
+    const key = cacheKey(sentence, engine)
+    const cached = cacheGet(key)
+    if (cached) {
+      log(`render cache hit: ${sentence.length} chars (engine ${engine}, wav ${cached.length} bytes)`)
+      return { audioBase64: cached.toString('base64'), elapsedMs: 0, engine, cached: true }
+    }
+    await ensureServer()
+    const started = Date.now()
+    const wav = await renderWav(sentence, { engine })
+    const elapsedMs = Date.now() - started
+    log(`render ok: ${sentence.length} chars in ${elapsedMs}ms (engine ${engine}, wav ${wav.length} bytes)`)
+    cachePut(key, wav)
+    return { audioBase64: wav.toString('base64'), elapsedMs, engine, cached: false }
+  }
 }
 
 Object.defineProperty(TtsController.prototype, REMOTE_METHODS_KEY, {
@@ -421,6 +485,8 @@ Object.defineProperty(TtsController.prototype, REMOTE_METHODS_KEY, {
     methods: Object.freeze([
       { method: 'status', invocation: { kind: 'direct' } },
       { method: 'synthesize', invocation: { kind: 'direct' } },
+      { method: 'plan', invocation: { kind: 'direct' } },
+      { method: 'render', invocation: { kind: 'direct' } },
       { method: 'setEngine', invocation: { kind: 'direct' } },
     ]),
   }),

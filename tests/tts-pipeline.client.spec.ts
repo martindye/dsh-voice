@@ -1,0 +1,164 @@
+// @vitest-environment jsdom
+/**
+ * The sentence pipeline: plan -> one render per sentence -> back-to-back
+ * scheduling on a (fake) AudioContext, with stopPlayback() aborting the
+ * in-flight render.
+ */
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const holder = vi.hoisted(() => ({ ctx: null as Record<string, unknown> | null }))
+
+vi.mock('../src/client/audio-unlock.ts', () => ({
+  getSharedAudioContext: () => holder.ctx,
+  unlockPageAudio: () => { /* the tests need no gesture unlock */ },
+}))
+
+import { isPlaying, setTtsRemote, speak, stopPlayback } from '../src/client/tts.ts'
+
+const B64 = Buffer.from('RIFFfake').toString('base64')
+
+interface Started { at?: number; dur: number }
+
+function makeCtx(): Record<string, unknown> & { started: Started[] } {
+  const started: Started[] = []
+  return {
+    state: 'running',
+    currentTime: 0,
+    destination: {},
+    resume: async () => { /* already running */ },
+    decodeAudioData: async () => ({ duration: 2 }),
+    createBufferSource: () => ({
+      buffer: null,
+      connect: () => { /* fake destination */ },
+      start: (at?: number) => { started.push({ at, dur: 2 }) },
+      stop: () => { /* recorded below if needed */ },
+    }),
+    started,
+  }
+}
+
+interface RenderCall { text: string; signal?: unknown }
+
+function fakeRemote(sentences: string[], renderDelay = 0) {
+  const renders: RenderCall[] = []
+  return {
+    renders,
+    remote: {
+      status: async () => ({ server: 'up', engine: 'pocket' }),
+      plan: async () => ({ stale: false, sentences }),
+      render: (request: { text: string }, signal?: unknown) =>
+        new Promise<unknown>((resolve, reject) => {
+          renders.push({ text: request.text, signal })
+          // With a render delay the FIRST sentence settles (after the delay)
+          // and every later one hangs until the caller aborts it — that is
+          // the "render in flight while the voice is speaking" state.
+          if (renderDelay > 0 && renders.length > 1) {
+            signal?.addEventListener?.('abort', () => reject(new Error('aborted')))
+            return
+          }
+          setTimeout(() => resolve({ audioBase64: B64, engine: 'pocket' }), renderDelay)
+        }),
+      synthesize: undefined,
+      setEngine: async () => ({ ok: true }),
+    },
+  }
+}
+
+beforeEach(() => {
+  stopPlayback()
+})
+
+describe('sentence pipeline', () => {
+  it('plans once, renders sentence by sentence, and schedules them back-to-back', async () => {
+    const ctx = makeCtx()
+    holder.ctx = ctx
+    const plans: unknown[] = []
+    const fake = fakeRemote(['One one.', 'Two two.', 'Three three.'])
+    const planSpy = async (request: unknown): Promise<unknown> => {
+      plans.push(request)
+      return { stale: false, sentences: ['One one.', 'Two two.', 'Three three.'] }
+    }
+    setTtsRemote({ tts: { ...fake.remote, plan: planSpy } } as never)
+
+    const outcome = await speak('s1', 'm1')
+    expect(outcome).toEqual({ audio: true })
+    expect(isPlaying()).toBe(true)
+
+    // All three sentences render (in order) even though speak() already
+    // settled after the first was scheduled.
+    await vi.waitFor(() => {
+      expect(ctx.started.length).toBe(3)
+    }, { timeout: 3000, interval: 10 })
+
+    expect(plans).toEqual([{ sessionId: 's1', messageId: 'm1', auto: false }])
+    expect(fake.renders.map((r) => r.text)).toEqual(['One one.', 'Two two.', 'Three three.'])
+    // Back-to-back: 0.08 start, then +2 s (the fake duration) each.
+    expect(ctx.started[0]?.at).toBeCloseTo(0.08, 5)
+    expect(ctx.started[1]?.at).toBeCloseTo(2.08, 5)
+    expect(ctx.started[2]?.at).toBeCloseTo(4.08, 5)
+    stopPlayback()
+    expect(isPlaying()).toBe(false)
+  })
+
+  it('stopPlayback aborts the render that is in flight', async () => {
+    const ctx = makeCtx()
+    holder.ctx = ctx
+    const fake = fakeRemote(['First.', 'Second.', 'Third.'], 30) // later renders hang
+    setTtsRemote({ tts: fake.remote } as never)
+
+    const outcome = await speak('s2', 'm2')
+    expect(outcome).toEqual({ audio: true })
+    expect(isPlaying()).toBe(true)
+
+    stopPlayback()
+
+    expect(isPlaying()).toBe(false)
+    // The second sentence was requested but never settled: it was aborted
+    // in flight, and the third was never requested.
+    expect(fake.renders.map((r) => r.text)).toEqual(['First.', 'Second.'])
+    expect(fake.renders[0]?.signal).toBeInstanceOf(AbortSignal)
+    expect(fake.renders[1]?.signal?.aborted).toBe(true)
+    expect(ctx.started).toHaveLength(1)
+  })
+
+  it('falls back to the whole-message render when the host has no plan', async () => {
+    const ctx = makeCtx()
+    holder.ctx = ctx
+    const synthesized: unknown[] = []
+    setTtsRemote({
+      tts: {
+        status: async () => ({ server: 'up', engine: 'pocket' }),
+        synthesize: async (request: unknown) => {
+          synthesized.push(request)
+          return { audioBase64: B64, elapsedMs: 1 }
+        },
+        setEngine: async () => ({ ok: true }),
+      },
+    } as never)
+
+    const outcome = await speak('s3', 'm3', { auto: false })
+    expect(outcome).toEqual({ audio: true })
+    expect(synthesized).toEqual([{ sessionId: 's3', messageId: 'm3', auto: false }])
+    await vi.waitFor(() => {
+      expect((ctx as { started?: Started[] }).started?.length).toBe(1)
+    }, { timeout: 3000, interval: 10 })
+    stopPlayback()
+  })
+
+  it('surfaces a stale plan without rendering anything', async () => {
+    const ctx = makeCtx()
+    holder.ctx = ctx
+    const fake = fakeRemote(['Never spoken.'])
+    setTtsRemote({
+      tts: {
+        ...fake.remote,
+        plan: async () => ({ stale: true, ageSeconds: 99 }),
+      },
+    } as never)
+
+    const outcome = await speak('s4', 'm4', { auto: true })
+    expect(outcome).toEqual({ stale: true })
+    expect(fake.renders).toHaveLength(0)
+    expect(isPlaying()).toBe(false)
+  })
+})
