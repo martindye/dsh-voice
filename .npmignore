@@ -1,0 +1,11 @@
+# build scratch and Python noise — the `files` whitelist already narrows the
+# pack, this keeps machine-local noise out of the whitelisted dirs
+**/__pycache__/
+*.pyc
+tests/
+*.log
+.dsh/
+node_modules/
+pnpm-lock.yaml
+tsdown.config.ts
+vitest.config.ts

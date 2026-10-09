@@ -47,7 +47,9 @@ Output (the speaker):
 - `bin/tts-server.exe` — the bundled qwentts.cpp server for the qwen3 engine
   (adopts a compatible resident server on 127.0.0.1:8095 when present).
 - `ref_voices/` — the reference voices the qwen3 engine clones from
-  (`pocket`, `warm-brit`).
+  (`pocket`, `warm-brit`). Both are synthetic takes (Pocket TTS and a
+  VoiceDesign take respectively) — no real person's voice is bundled; see
+  `THIRD-PARTY.md` for the full attribution list.
 - `lib/` — build output (`lib/index.js` node half, `lib/client.js` browser
   bundle). Gitignored; rebuild with `pnpm bundle`.
 - `tests/` — vitest client tests (jsdom): the composer audio pipeline, the
