@@ -65,6 +65,15 @@ export class Recording {
    */
   hasAudioSince(when: number): boolean { return this.lastChunkAt > when }
 
+  /**
+   * Whether the AudioContext cannot be trusted (suspended): the analyser
+   * reads a live microphone as silence, so the recorder's data becomes the
+   * ground truth that the mic is alive.
+   */
+  analyserBlind(): boolean {
+    return this.context !== undefined && this.context.state !== 'running'
+  }
+
   constructor(private readonly onDispose: () => void) {}
 
   /**

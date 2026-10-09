@@ -448,9 +448,10 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
       if (active.vadStart === undefined) active.vadStart = now
       // The level meter reads through the AudioContext, which iOS can keep
       // suspended; a suspended context reads a live microphone as silence.
-      // Recorder data is the ground truth that the mic is alive, so a mic
-      // that keeps delivering audio is never abandoned as "no speech".
-      if (active.capture.hasAudioSince(active.vadLastVoice ?? active.vadStart)) {
+      // Only then is recorder data the ground truth that the mic is alive:
+      // on a running context the mic delivers a packet every half second
+      // even in silence, so it must never be mistaken for speech.
+      if (active.capture.analyserBlind() && active.capture.hasAudioSince(active.vadLastVoice ?? active.vadStart)) {
         if (active.vadHeardAt === undefined) active.vadHeardAt = now
         active.vadLastVoice = now
         return
