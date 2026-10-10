@@ -478,15 +478,21 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     return () => window.clearInterval(iv)
   }, [phase, cancel, feedback, finish, t])
   // Continuous listening: when a reply has ended (thought AND, if spoken,
-  // heard), reopen the microphone so the next words need no tap. An
-  // auto-open that draws no words is quietly re-offered again, so the
-  // conversation stays open until the user says otherwise.
+  // heard), reopen the microphone so the next words need no tap. While a
+  // turn is thinking (and not speaking) the microphone stays open as well,
+  // so words spoken mid-turn are transcribed and queued. An auto-open that
+  // draws no words is quietly re-offered again, so the conversation stays
+  // open until the user says otherwise.
   useEffect(() => {
-    if (!armed || !empty || locked || running || speaking || phase !== 'idle') return
+    if (!armed || !empty || locked || speaking || phase !== 'idle') return
     const tick = (): void => {
       // A muted mic stays closed: opening it would only churn, and the tick
       // re-opens it the moment the user unmutes.
       if (paused.current || mutedRef.current || current.current || phase !== 'idle') return
+      // The agent is thinking, not speaking: keep the mic open so words
+      // spoken mid-turn are transcribed and queued like any other words.
+      // The reply's own speech closes it again (the speaking guard above).
+      if (running) { void start(true); return }
       const ended = turnEndedAt.current
       if (ended === undefined) return
       if (sawSpeech.current || Date.now() - ended >= LISTEN_SETTLE_MS) {
@@ -517,21 +523,33 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
       onClick={toggleMute}><MicMutedGlyph /></Button></span>
   )
   if (phase === 'requesting' || phase === 'recording' || phase === 'transcribing') {
-    // The button stays live in every phase: a press cancels a pending
-    // permission request or a transcription in flight. Disabled while
-    // transcribing it read grey ("stuck, nothing will happen") in the gap
-    // before a reply starts — the words are final by then, so cancelling is
-    // always safe and cheap.
-    const label = phase === 'recording' ? t('voiceChat.stop') : t('cancel')
+    // The button stays live in every phase. While a turn is in flight the
+    // microphone is open (mid-turn words queue), so the button is the stop
+    // square: it stops the turn, drops the in-flight utterance (a clean
+    // break) and exits speech mode, exactly like the idle stop square. Out
+    // of a turn it is the cross (end the utterance) or the cancel
+    // (requesting / transcribing).
+    const stopTurnSquare = running && phase !== 'requesting'
+    const label = stopTurnSquare ? t('stopGenerating') : phase === 'recording' ? t('voiceChat.stop') : t('cancel')
     return (
-      <span className={css.voiceChatPair} ref={cardRef}>
+      <span className={css.voiceChatPair} ref={cardRef} data-voice-live="1">
         {muteButton}
         <Tooltip label={label} side="top" portal>
-          <span className={css.triggerAnchor}><Button type="button" className={`${css.voiceChat} ${css.voiceChatOn}`} size="sm"
+          <span className={css.triggerAnchor}><Button type="button" data-voice-unified="1" className={`${css.voiceChat} ${css.voiceChatOn}`} size="sm"
             aria-label={label}
             onMouseDown={(event) => { event.preventDefault() }}
-            onClick={() => { if (phase === 'recording') void finish(); else cancel() }}>
-            {phase === 'transcribing' ? <StateDot state="ongoing" /> : phase === 'recording' ? <CloseGlyph /> : <VoiceChatGlyph />}</Button></span>
+            onClick={() => {
+              if (stopTurnSquare) {
+                // The stop is the "further notice" for speech mode, exactly
+                // like the idle stop square: the reply stops, the
+                // in-flight utterance is dropped, and the conversation row
+                // returns.
+                stopTurn(sessionId); cancel(); setArmed(false); turnEndedAt.current = undefined; sawSpeech.current = false
+                return
+              }
+              if (phase === 'recording' && !running) void finish(); else cancel()
+            }}>
+            {stopTurnSquare ? <StopSquareGlyph /> : phase === 'transcribing' ? <StateDot state="ongoing" /> : phase === 'recording' ? <CloseGlyph /> : <VoiceChatGlyph />}</Button></span>
         </Tooltip>
       </span>
     )

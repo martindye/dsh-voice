@@ -55,31 +55,33 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', async (importOriginal) => {
 type Label = string | 'none'
 
 /** Read exactly what the user sees: the primary action button and the mute slot. */
-function probe(container: HTMLElement): { unified: Label; mute: Label; all: Label[] } {
+function probe(container: HTMLElement): { unified: Label; mute: Label; all: Label[]; live: boolean } {
   const labels: Label[] = []
   for (const button of Array.from(container.querySelectorAll<HTMLButtonElement>('button'))) {
     const name = button.getAttribute('aria-label') ?? 'unnamed'
     if (!labels.includes(name)) labels.push(name)
   }
-  // The unified idle button carries data-voice-unified; the phase buttons
-  // (recording / transcribing / requesting) do not, so fall back to them.
   const unifiedEl = container.querySelector<HTMLButtonElement>('[data-voice-unified="1"]')
     ?? container.querySelector<HTMLButtonElement>('button[aria-label="voiceChat.stop"], button[aria-label="transcribingShort"], button[aria-label="cancel"]')
   return {
     unified: unifiedEl?.getAttribute('aria-label') ?? 'none',
     mute: labels.includes('muteMic') ? 'muteMic' : labels.includes('unmuteMic') ? 'unmuteMic' : 'none',
     all: labels,
+    // The live microphone (the data-voice-live phase row), whatever the
+    // button shows: while a turn is in flight it is the stop square, which
+    // is visually identical to the pending-turn square.
+    live: container.querySelector('[data-voice-live="1"]') !== null,
   }
 }
 
-interface TraceEntry { at: number; event: string; primary: Label; mute: Label; all: Label[] }
+interface TraceEntry { at: number; event: string; primary: Label; mute: Label; all: Label[]; live: boolean }
 const t0 = Date.now()
 const trace: TraceEntry[] = []
 let currentTest = ''
 
 function note(container: HTMLElement, event: string): void {
   const view = probe(container)
-  trace.push({ at: Date.now() - t0, event, primary: view.unified, mute: view.mute, all: view.all })
+  trace.push({ at: Date.now() - t0, event, primary: view.unified, mute: view.mute, all: view.all, live: view.live })
 }
 
 /** Record a transition whenever the visible primary/mute pair changes. */
@@ -90,7 +92,7 @@ const metricLines: Record<string, unknown>[] = []
 
 function watch(container: HTMLElement, label: string): void {
   const view = probe(container)
-  const key = `${view.unified}|${view.mute}`
+  const key = `${view.unified}|${view.mute}|${view.live}`
   if (key !== lastKey) {
     lastKey = key
     note(container, `change ${label}`)
@@ -99,7 +101,7 @@ function watch(container: HTMLElement, label: string): void {
 
 function printTrace(name: string): void {
   const lines = trace.map((e) =>
-    `${String(e.at).padStart(7)}ms  ${e.event.padEnd(34)} primary=${String(e.primary).padEnd(16)} mute=${e.mute.padEnd(8)} [${e.all.join(', ')}]`)
+    `${String(e.at).padStart(7)}ms  ${e.event.padEnd(34)} primary=${String(e.primary).padEnd(16)} mute=${e.mute.padEnd(8)}${e.live ? ' live' : '       '} [${e.all.join(', ')}]`)
   console.log(`\n=== trace: ${name} (${trace.length} visible changes) ===\n${lines.join('\n')}`)
   try {
     // vitest runs from the repo root; the traces land in tests/ next to this file.
@@ -108,16 +110,16 @@ function printTrace(name: string): void {
   } catch (err) { console.error('trace write failed:', err) }
 }
 
-/** How many separate times the microphone went live (cross + mute on screen).
- * A flicker from a focus event shows up as an EXTRA session: a recording that
- * was killed and later reopened is a second session. A clean turn is exactly
- * one session; the legitimate end of an utterance is not counted. */
+/** How many separate times the microphone went live (the data-voice-live
+ * row on screen). A flicker from a focus event shows up as an EXTRA session:
+ * a recording that was killed and later reopened is a second session. A clean
+ * turn is exactly one session; the legitimate end of an utterance is not
+ * counted. */
 function recordingSessions(from = 0): number {
   let count = 0, inRecording = false
   for (const e of trace.slice(from)) {
-    const recording = e.primary === 'voiceChat.stop' && e.mute !== 'none'
-    if (recording && !inRecording) { count += 1; inRecording = true }
-    else if (!recording) inRecording = false
+    if (e.live && !inRecording) { count += 1; inRecording = true }
+    else if (!e.live) inRecording = false
   }
   return count
 }
@@ -402,9 +404,12 @@ it('exits speech mode on stop: the default row returns and the mic does not reop
   watch(s.container, 'turn1 recording')
   await speak(s)
   await waitSubmitted(s)
+  watch(s.container, 'turn1 submitted')
   s.snapshot.running = true; s.rerender()
+  // While the agent thinks the microphone stays open (mid-turn words queue)
+  // and the button is the stop square.
   await s.waitForPrimary('stopGenerating')
-  watch(s.container, 'agent running')
+  watch(s.container, 'agent running, mic open')
   expect(s.container.querySelector('button[aria-label="start"]')).toBeNull() // speech mode: no dictate
 
   // The user stops the reply.
@@ -422,7 +427,8 @@ it('exits speech mode on stop: the default row returns and the mic does not reop
   watch(s.container, 'settle window passed')
   expect(s.container.querySelector('button[aria-label="voiceChat.stop"]')).toBeNull()
   expect(probe(s.container).unified).toBe('voiceChat.start')
-  expect(recordingSessions()).toBe(1) // only the first turn ever opened the mic
+  // turn one's tap-open and the thinking-phase auto-open; nothing after the stop
+  expect(recordingSessions()).toBe(2)
 
   printTrace(currentTest)
 }, 60000)
@@ -460,13 +466,14 @@ it('the mute joins the row only during a voice conversation', async () => {
   watch(s.container, 'turn pending')
   expect(probe(s.container).mute).toBe('muteMic')
 
-  // The session reports the turn running: the square and the mute stay.
+  // The session reports the turn running: the mic stays open (mid-turn words
+  // queue) and the square and the mute stay.
   s.snapshot.running = true; s.rerender()
   await s.waitForPrimary('stopGenerating')
-  watch(s.container, 'agent running')
+  watch(s.container, 'agent running, mic open')
   expect(probe(s.container).mute).toBe('muteMic')
 
-  // End the conversation: the default row returns and the mute leaves with it.
+  // Stop the reply: the default row returns and the mute leaves with it.
   s.tapUnified()
   s.snapshot.running = false; s.rerender()
   await s.waitForPrimary('voiceChat.start')
