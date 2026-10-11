@@ -19,18 +19,18 @@ const B64 = Buffer.from('RIFFfake').toString('base64')
 
 interface Started { at?: number; dur: number }
 
-function makeCtx(): Record<string, unknown> & { started: Started[] } {
+function makeCtx(duration = 2): Record<string, unknown> & { started: Started[] } {
   const started: Started[] = []
   return {
     state: 'running',
     currentTime: 0,
     destination: {},
     resume: async () => { /* already running */ },
-    decodeAudioData: async () => ({ duration: 2 }),
+    decodeAudioData: async () => ({ duration }),
     createBufferSource: () => ({
       buffer: null,
       connect: () => { /* fake destination */ },
-      start: (at?: number) => { started.push({ at, dur: 2 }) },
+      start: (at?: number) => { started.push({ at, dur: duration }) },
       stop: () => { /* recorded below if needed */ },
     }),
     started,
@@ -194,6 +194,72 @@ describe('sentence pipeline', () => {
     // while 'A.' had already finished, so the two render as one clip.
     expect(fake.renders).toHaveLength(1)
     expect(fake.renders[0]?.text).toBe('A. A considerably longer sentence follows.')
+    stopPlayback()
+  })
+})
+
+describe('serial audio queue', () => {
+  /** Plan by message id: m1 is two sentences, m2 is two different ones. */
+  function queueRemote() {
+    const renders: string[] = []
+    return {
+      renders,
+      tts: {
+        status: async () => ({ server: 'up', engine: 'pocket' }),
+        plan: async (request: { messageId: string }) => ({
+          stale: false,
+          sentences: request.messageId === 'm1' ? ['First.', 'Second.'] : ['Third.', 'Fourth.'],
+        }),
+        render: (request: { text: string }, signal?: unknown) =>
+          new Promise<unknown>((resolve, reject) => {
+            renders.push(request.text)
+            signal?.addEventListener?.('abort', () => reject(new Error('aborted')))
+            setTimeout(() => resolve({ audioBase64: B64, engine: 'pocket' }), 0)
+          }),
+        synthesize: undefined,
+        setEngine: async () => ({ ok: true }),
+      },
+    }
+  }
+
+  it('lines an auto-read up behind playing audio instead of cutting in', async () => {
+    const ctx = makeCtx(0.5)
+    holder.ctx = ctx
+    const fake = queueRemote()
+    setTtsRemote({ tts: fake.tts } as never)
+
+    const [first, second] = await Promise.all([
+      speak('s1', 'm1', { auto: true }), // triggered first: speaks first
+      speak('s1', 'm2', { auto: true }), // triggered second: must wait its turn
+    ])
+    expect(first).toEqual({ audio: true })
+
+    // Strictly serial: the second read's sentences are not even rendered
+    // until the first read has gone silent — no interleaving, no cut-in.
+    await vi.waitFor(() => {
+      expect(ctx.started).toHaveLength(4)
+    }, { timeout: 6000, interval: 10 })
+    expect(fake.renders).toEqual(['First.', 'Second.', 'Third.', 'Fourth.'])
+    expect(second).toEqual({ audio: true })
+    stopPlayback()
+  })
+
+  it('gives up a queued auto-read when a stop happens while it waits', async () => {
+    const ctx = makeCtx(0.5)
+    holder.ctx = ctx
+    const fake = queueRemote()
+    setTtsRemote({ tts: fake.tts } as never)
+
+    await speak('s1', 'm1') // the manual read is playing
+    expect(isPlaying()).toBe(true)
+    const second = speak('s1', 'm2', { auto: true }) // lines up behind m1
+    stopPlayback() // silence while m2 is still waiting
+
+    const outcome = await second
+    expect(outcome).toEqual({})
+    expect(isPlaying()).toBe(false)
+    // m2 gave up: none of its sentences were ever rendered.
+    expect(fake.renders).toEqual(['First.', 'Second.'])
     stopPlayback()
   })
 })

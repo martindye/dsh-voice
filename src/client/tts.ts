@@ -158,6 +158,7 @@ export function isPlaying(): boolean {
 }
 
 export function stopPlayback(): void {
+  generation += 1
   if (pipelineAbort) {
     try { pipelineAbort.abort() } catch { /* already stopped */ }
     pipelineAbort = null
@@ -166,6 +167,65 @@ export function stopPlayback(): void {
   try { currentAudio.stop() } catch { /* already stopped */ }
   currentAudio = null
   emit()
+}
+
+/* ------------------------------------------------------ serial audio queue */
+
+/**
+ * The serial audio queue: one voice at a time, in order.
+ *
+ * A manual read (the speaker button) and an explicit stop cut in at once —
+ * those are deliberate human actions. An auto-read never cuts in: it lines
+ * up behind whatever is playing, so a fast reply reads after the previous
+ * sentence finishes instead of interrupting it mid-word. While an auto-read
+ * is waiting, a stop or a manual read bumps the generation; the waiter wakes,
+ * sees the mismatch, and gives up silently.
+ */
+interface Tail {
+  /** Settles when this playback is (or has become) fully silent. */
+  readonly promise: Promise<void>
+  /** Idempotent: safe to call from every exit path. */
+  settle: () => void
+}
+
+/** The tail of the queue: when it settles, everything ahead is silent. */
+let tail: Tail = { promise: Promise.resolve(), settle: () => { /* nothing playing */ } }
+
+/** Bumped on every stop/cut-in: queued auto-reads that miss it give up. */
+let generation = 0
+
+function makeTail(): Tail {
+  let done = false
+  let resolve = () => { /* already settled */ }
+  const promise = new Promise<void>((r) => { resolve = r })
+  return {
+    promise,
+    settle: () => { if (!done) { done = true; resolve() } },
+  }
+}
+
+/**
+ * Line up in the queue and claim the next slot. Returns the tail this read
+ * owns — installed synchronously, so two admissions can never interleave —
+ * or null when the read must give up. `baseline` is the generation at the
+ * moment the read was triggered, so a stop or a manual read that happened
+ * even before it got to line up still cancels it. A manual read while
+ * waiting does NOT cancel: the read lines up behind the manual one instead.
+ */
+async function admitToQueue(baseline: number): Promise<Tail | null> {
+  let since = baseline
+  for (;;) {
+    const wait = tail
+    await wait.promise
+    if (generation === since) {
+      if (tail !== wait) continue // someone got ahead of us: line up again
+      const mine = makeTail()
+      tail = mine
+      return mine
+    }
+    if (tail !== wait) { since = generation; continue } // a manual read: behind it
+    return null // a pure stop: silence was asked for
+  }
 }
 
 function blockedMessage(): string {
@@ -186,8 +246,7 @@ function decodeBase64(b64: string): Uint8Array {
   return bytes
 }
 
-async function playB64(b64: string): Promise<void> {
-  stopPlayback()
+async function playB64(b64: string, mine: Tail): Promise<void> {
   let bytes: Uint8Array
   try {
     bytes = decodeBase64(b64)
@@ -196,6 +255,7 @@ async function playB64(b64: string): Promise<void> {
     emit()
     return
   }
+  const finish = (h: PlaybackHandle): void => { if (currentAudio === h) { currentAudio = null; emit() } mine.settle() }
   // Preferred path: WebAudio through the gesture-unlocked shared context.
   const ac = getSharedAudioContext()
   if (ac && ac.state !== 'closed') {
@@ -205,14 +265,15 @@ async function playB64(b64: string): Promise<void> {
       const src = ac.createBufferSource()
       src.buffer = decoded
       src.connect(ac.destination)
-      const handle: PlaybackHandle = { stop: () => { try { src.stop() } catch { /* ignore */ } } }
-      src.onended = () => { if (currentAudio === handle) { currentAudio = null; emit() } }
+      const handle: PlaybackHandle = { stop: () => { try { src.stop() } catch { /* ignore */ } mine.settle() } }
+      src.onended = () => finish(handle)
       currentAudio = handle
       src.start()
       lastError = null
       emit()
     } catch (error) {
       currentAudio = null
+      mine.settle()
       lastError = webAudioBlocked(error)
         ? blockedMessage()
         : 'audio playback failed: ' + String((error as { message?: unknown })?.message ?? error)
@@ -222,12 +283,13 @@ async function playB64(b64: string): Promise<void> {
   }
   // Fallback: plain media element (works once the domain is unlocked).
   const a = new Audio(`data:audio/wav;base64,${b64}`)
-  const handle: PlaybackHandle = { stop: () => { try { a.pause() } catch { /* ignore */ } } }
-  a.onended = () => { if (currentAudio === handle) { currentAudio = null; emit() } }
-  a.onerror = () => { if (currentAudio === handle) { currentAudio = null; lastError = 'the audio element failed to load'; emit() } }
+  const handle: PlaybackHandle = { stop: () => { try { a.pause() } catch { /* ignore */ } mine.settle() } }
+  a.onended = () => finish(handle)
+  a.onerror = () => { if (currentAudio === handle) { currentAudio = null; lastError = 'the audio element failed to load'; emit() } mine.settle() }
   currentAudio = handle
   void a.play().catch((error: unknown) => {
     currentAudio = null
+    mine.settle()
     lastError = (error as { name?: string })?.name === 'NotAllowedError'
       ? blockedMessage()
       : 'audio playback failed: ' + String((error as { message?: unknown })?.message ?? error)
@@ -309,20 +371,37 @@ export function noteRenderSample(audioSeconds: number, renderSeconds: number): v
  * The returned promise settles when the FIRST block is scheduled (or the
  * pipeline dies before that), which is when the "speaking" state becomes real.
  */
-function speakSentencesPipelined(blocks: string[], remote: TtsNamespace): Promise<void> {
-  stopPlayback() // kills any previous playback and its in-flight render
+/**
+ * Stop whatever is playing and take the queue slot for a deliberate read
+ * (speaker button, tap-to-speak). All synchronous, so no other read can
+ * interleave between the stop and the claim.
+ */
+function claimFreshTail(): Tail {
+  stopPlayback()
+  const mine = makeTail()
+  tail = mine
+  return mine
+}
+
+/** A manual read cuts in at once: stop the current audio, start this now. */
+function runManualPipeline(blocks: string[], remote: TtsNamespace): Promise<boolean> {
+  return runPipelined(blocks, remote, claimFreshTail())
+}
+
+function runPipelined(blocks: string[], remote: TtsNamespace, mine: Tail): Promise<boolean> {
   const ac = getSharedAudioContext()
   if (!ac || ac.state === 'closed') {
+    mine.settle()
     lastError = 'audio is not ready on this device'
     emit()
-    return Promise.resolve()
+    return Promise.resolve(true)
   }
   const abort = new AbortController()
   pipelineAbort = abort
   const sources: { stop: () => void }[] = []
   let endTimer = 0
   let firstScheduled: (() => void) | null = null
-  const firstSentence = new Promise<void>((resolve) => { firstScheduled = resolve })
+  const firstSentence = new Promise<boolean>((resolve) => { firstScheduled = () => { resolve(true) } })
   const handle: PlaybackHandle = {
     stop: () => {
       try { abort.abort() } catch { /* already stopped */ }
@@ -331,6 +410,7 @@ function speakSentencesPipelined(blocks: string[], remote: TtsNamespace): Promis
       if (pipelineAbort === abort) pipelineAbort = null
       if (currentAudio === handle) currentAudio = null
       firstScheduled?.()
+      mine.settle()
     },
   }
   void (async () => {
@@ -338,9 +418,9 @@ function speakSentencesPipelined(blocks: string[], remote: TtsNamespace): Promis
       if (ac.state === 'suspended') await ac.resume()
       let nextStart = ac.currentTime + 0.08
       for (let i = 0; i < blocks.length; i++) {
-        if (abort.signal.aborted) return
+        if (abort.signal.aborted) { mine.settle(); return }
         const rendered = unwrapValue(await remote.render({ text: blocks[i] }, abort.signal))
-        if (abort.signal.aborted) return
+        if (abort.signal.aborted) { mine.settle(); return }
         if (!rendered.ok) throw new Error(rendered.error)
         const b64 = rendered.value?.audioBase64
         if (typeof b64 !== 'string' || !b64) throw new Error(`no audio for block ${i + 1}`)
@@ -350,7 +430,7 @@ function speakSentencesPipelined(blocks: string[], remote: TtsNamespace): Promis
         // Calibrate the render speed from what the host just reported, so
         // the NEXT reply's blocks are cut for this machine.
         noteRenderSample(decoded.duration, renderMs / 1000)
-        if (abort.signal.aborted) return
+        if (abort.signal.aborted) { mine.settle(); return }
         const src = ac.createBufferSource()
         src.buffer = decoded
         src.connect(ac.destination)
@@ -370,8 +450,10 @@ function speakSentencesPipelined(blocks: string[], remote: TtsNamespace): Promis
       const endMs = Math.max(0, (nextStart - ac.currentTime) * 1000)
       endTimer = window.setTimeout(() => {
         if (currentAudio === handle) { currentAudio = null; emit() }
+        mine.settle()
       }, endMs + 150)
     } catch (error) {
+      mine.settle()
       if (!abort.signal.aborted) {
         lastError = webAudioBlocked(error)
           ? blockedMessage()
@@ -467,8 +549,34 @@ export async function speak(
     if (!opts.auto) emit()
     return { error: lastError }
   }
-  if (typeof ns.plan === 'function' && typeof ns.render === 'function' && getSharedAudioContext()) {
-    const remote = ns
+  const auto = !!opts.auto
+  // An auto-read reserves its slot in the serial queue the moment it is
+  // triggered — before the plan is even fetched — so two fast replies line
+  // up in trigger order no matter how the host orders the plan calls. A
+  // stop or a manual read while it waits, or while the plan is in flight,
+  // makes it give up.
+  const baseline = generation
+  const reserved = auto ? await admitToQueue(baseline) : null
+  if (auto && !reserved) return {}
+  let claimed = false
+  const q = { reserved, baseline, claim: () => { claimed = true } }
+  try {
+    return await speakWithPlan(sessionId, messageId, opts, q)
+  } finally {
+    // A slot never handed to a pipeline (stale plan, an error, a stop while
+    // the plan was in flight) must be released, or the queue jams.
+    if (reserved && !claimed) reserved.settle()
+  }
+}
+
+async function speakWithPlan(
+  sessionId: string,
+  messageId: string,
+  opts: { auto?: boolean; scope?: 'final' | 'steps' },
+  q: { reserved: Tail | null; baseline: number; claim: () => void },
+): Promise<SpeakOutcome> {
+  if (typeof ns!.plan === 'function' && typeof ns!.render === 'function' && getSharedAudioContext()) {
+    const remote = ns!
     let plan: unknown
     try {
       plan = await remote.plan({ sessionId, messageId, auto: !!opts.auto, scope: opts.scope ?? 'final' })
@@ -497,7 +605,17 @@ export async function speak(
     // rendering when the previous clip has finished plays inside the
     // previous clip's block instead, so no gap can open between them.
     const blocks = sentenceBlocks(sentences, loadRenderSpeed()).map((block) => block.join(' '))
-    await speakSentencesPipelined(blocks, remote)
+    let ran = false
+    if (q.reserved) {
+      // A stop or a manual read that happened while the plan was in flight
+      // cancels this auto-read.
+      if (generation !== q.baseline) return {}
+      q.claim()
+      ran = await runPipelined(blocks, remote, q.reserved)
+    } else {
+      ran = await runManualPipeline(blocks, remote)
+    }
+    if (!ran) return {}
     if (isPlaying()) return { audio: true }
     return lastError ? { error: lastError } : { audio: true }
   }
@@ -528,7 +646,13 @@ export async function speak(
     }
     lastError = null
     emit()
-    void playB64(out.audioBase64)
+    if (q.reserved) {
+      if (generation !== q.baseline) return {}
+      q.claim()
+      void playB64(out.audioBase64, q.reserved)
+    } else {
+      void playB64(out.audioBase64, claimFreshTail())
+    }
     return { audio: true }
   } catch (error) {
     lastError = String((error as { message?: unknown })?.message ?? error)
