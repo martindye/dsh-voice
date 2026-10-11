@@ -29,8 +29,7 @@ export const MARKER_PRESETS = [
 ] as const
 
 /** The fixed note the sidecar style attaches after the user's words. */
-export const SIDECAR_NOTE =
-  '(Dictated: this message was spoken and transcribed from speech; expect homophones, word slips and missing punctuation — read it by intent.)'
+export const SIDECAR_NOTE = '(transcribed)'
 
 const MODE_KEY = 'dsh-voice:dictation-flag-mode'
 const MARKER_KEY = 'dsh-voice:dictation-flag-marker'
