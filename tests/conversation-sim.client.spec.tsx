@@ -5,8 +5,8 @@
  * Drives a real <VoiceInput/> through a scripted speak -> reply -> speak
  * conversation the way a phone does (tap, talk, pause, reply, auto-reopen,
  * talk again), and records a state trace of every change the user can see:
- * the primary action button (dictate mic, waveform, send arrow, stop square,
- * cross, transcribing dot) and the mute button.
+ * the primary action button (dictate mic, waveform, send arrow, and the
+ * cross — the one stop control) and the mute button.
  *
  * The trace is written to tests/sim-trace-<test>.jsonl (one entry per
  * visible change) so a flicker can be inspected line by line.
@@ -16,7 +16,7 @@
  *    kill the turn: the mute + cross stay put and the turn resumes.
  *  - I3: when the system starts speaking during an auto-opened
  *    microphone, there is exactly one designed handover per reply
- *    (recording -> speaking-stop-square -> recording), never a bare idle.
+ *    (recording -> speaking-cross -> recording), never a bare idle.
  *  - I4: the mute joins the row only during a voice conversation — it takes
  *    the dictate button's place and never appears with the dictate — and the
  *    default row (dictate + voice) returns when the conversation ends.
@@ -63,7 +63,7 @@ function probe(container: HTMLElement): { unified: Label; mute: Label; all: Labe
     if (!labels.includes(name)) labels.push(name)
   }
   const unifiedEl = container.querySelector<HTMLButtonElement>('[data-voice-unified="1"]')
-    ?? container.querySelector<HTMLButtonElement>('button[aria-label="voiceChat.stop"], button[aria-label="transcribingShort"], button[aria-label="cancel"]')
+    ?? container.querySelector<HTMLButtonElement>('button[aria-label="stopVoiceChat"], button[aria-label="transcribingShort"], button[aria-label="cancel"]')
   return {
     unified: unifiedEl?.getAttribute('aria-label') ?? 'none',
     mute: labels.includes('muteMic') ? 'muteMic' : labels.includes('unmuteMic') ? 'unmuteMic' : 'none',
@@ -220,7 +220,7 @@ function makeSim(): Sim {
     waitForPrimary: async (label: string) => {
       await waitFor(() => {
         const el = container.querySelector<HTMLButtonElement>('[data-voice-unified="1"]')
-          ?? container.querySelector<HTMLButtonElement>('button[aria-label="voiceChat.stop"], button[aria-label="transcribingShort"]')
+          ?? container.querySelector<HTMLButtonElement>('button[aria-label="stopVoiceChat"], button[aria-label="transcribingShort"]')
         if (el?.getAttribute('aria-label') !== label) throw new Error(`primary is ${el?.getAttribute('aria-label')}, want ${label}`)
       }, { timeout: 9000, interval: 50 })
     },
@@ -243,7 +243,7 @@ async function waitSubmitted(s: Sim): Promise<void> {
 /** Tap the voice-chat entry (waveform) and wait for the live recording. */
 async function startTurn(s: Sim): Promise<void> {
   s.tapUnified()
-  await s.waitForPrimary('voiceChat.stop')
+  await s.waitForPrimary('stopVoiceChat')
 }
 
 beforeEach(() => {
@@ -284,7 +284,7 @@ it('converses two turns with no focus events: the rhythm is clean', async () => 
   watch(s.container, 'turn1 reply ended')
 
   // Continuous listening reopens the microphone ~3 s after the reply.
-  await s.waitForPrimary('voiceChat.stop')
+  await s.waitForPrimary('stopVoiceChat')
   watch(s.container, 'turn2 auto-open')
 
   // Turn two: talk again, silence, send.
@@ -339,7 +339,7 @@ it('keeps a live recording through a window blur (I2)', async () => {
   await sleep(250)
   watch(s.container, 'after blur')
   // The turn is still live: cross + mute still on screen, no idle excursion.
-  expect(s.container.querySelector('button[aria-label="voiceChat.stop"]')).toBeTruthy()
+  expect(s.container.querySelector('button[aria-label="stopVoiceChat"]')).toBeTruthy()
   expect(s.container.querySelector('button[aria-label="muteMic"], button[aria-label="unmuteMic"]')).toBeTruthy()
   expect(recordingSessions()).toBe(1) // one live recording, never killed
 
@@ -364,7 +364,7 @@ it('keeps a live recording through a screen-off (visibility hidden) (I2)', async
   s.hide()
   await sleep(250)
   watch(s.container, 'after screen-off')
-  expect(s.container.querySelector('button[aria-label="voiceChat.stop"]')).toBeTruthy()
+  expect(s.container.querySelector('button[aria-label="stopVoiceChat"]')).toBeTruthy()
   expect(recordingSessions()).toBe(1) // one live recording, never killed
 
   s.show()
@@ -388,7 +388,7 @@ it('shows exactly one designed handover when speech starts during an auto-open (
   await waitSubmitted(s)
   s.snapshot.running = true; s.rerender()
   s.snapshot.running = false; s.rerender()
-  await s.waitForPrimary('voiceChat.stop') // auto-open number one
+  await s.waitForPrimary('stopVoiceChat') // auto-open number one
   const atAutoOpen = trace.length
   watch(s.container, 'auto-open 1')
 
@@ -398,7 +398,7 @@ it('shows exactly one designed handover when speech starts during an auto-open (
   watch(s.container, 'speech starts mid auto-open')
   await sleep(1200) // the reply speaks
   s.setSpeaking(false)
-  await s.waitForPrimary('voiceChat.stop') // reopens for the next words
+  await s.waitForPrimary('stopVoiceChat') // reopens for the next words
   watch(s.container, 'auto-open 2')
 
   printTrace(currentTest)
@@ -408,7 +408,7 @@ it('shows exactly one designed handover when speech starts during an auto-open (
   // the microphone went live exactly twice (the designed open/handover/reopen).
   const window = trace.slice(atAutoOpen)
   for (const e of window) {
-    expect(['voiceChat.stop', 'stopSpeech']).toContain(e.primary)
+    expect(['stopVoiceChat', 'stopSpeech']).toContain(e.primary)
   }
   expect(recordingSessions(atAutoOpen)).toBe(2)
 }, 60000)
@@ -444,10 +444,39 @@ it('exits speech mode on stop: the default row returns and the mic does not reop
   // And it stays there: no auto-open crosses into a live microphone.
   await sleep(4200)
   watch(s.container, 'settle window passed')
-  expect(s.container.querySelector('button[aria-label="voiceChat.stop"]')).toBeNull()
+  expect(s.container.querySelector('button[aria-label="stopVoiceChat"]')).toBeNull()
   expect(probe(s.container).unified).toBe('voiceChat.start')
   // turn one's tap-open and the thinking-phase auto-open; nothing after the stop
   expect(recordingSessions()).toBe(2)
+
+  printTrace(currentTest)
+}, 60000)
+
+it('the cross stops the voice chat while the agent is idle: the words are dropped and the mic does not reopen', async () => {
+  currentTest = 'cross stops voice chat'
+  const s = makeSim()
+  watch(s.container, 'mount')
+
+  await startTurn(s)
+  watch(s.container, 'turn recording')
+  s.setAmplitude(0.2)
+  await sleep(300) // mid-utterance
+
+  // The cross: stop whatever is happening and end the conversation.
+  s.tapUnified()
+  await s.waitForPrimary('voiceChat.start')
+  watch(s.container, 'cross pressed')
+
+  // The in-flight words are dropped: nothing is sent.
+  expect(s.inputActions.submit).not.toHaveBeenCalled()
+  // The default row is back (dictate mic + waveform) and it stays there:
+  // the conversation is over, no auto-open reopens the microphone.
+  expect(s.container.querySelector('button[aria-label="start"]')).toBeTruthy()
+  await sleep(4200)
+  watch(s.container, 'settle window passed')
+  expect(probe(s.container).unified).toBe('voiceChat.start')
+  expect(s.container.querySelector('button[aria-label="stopVoiceChat"]')).toBeNull()
+  expect(recordingSessions()).toBe(1) // the one tap-open, never reopened
 
   printTrace(currentTest)
 }, 60000)

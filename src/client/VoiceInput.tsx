@@ -13,7 +13,7 @@ import { runningChanged, speechStarted, voiceEnded } from './metrics.ts'
 import type { SpeechReadiness } from './readiness.ts'
 import { VoiceSetupDialog } from './VoiceSetupDialog.tsx'
 import { NS } from './locales.ts'
-import { Button, IconCloseOutlineRegular, IconMicrophoneOutlineRegular, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconCloseOutlineRegular, IconMicrophoneOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './VoiceInput.module.css'
 
 /** Host calls injected without exposing a Cordis Context to React. */
@@ -164,15 +164,6 @@ function MicMutedGlyph() {
         <path d="M2.8 2.4l10.4 11.2" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
       </svg>
     </span>
-  )
-}
-
-/** Filled rounded stop square: the composer's native stop glyph. */
-function StopSquareGlyph() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
-      <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
-    </svg>
   )
 }
 
@@ -538,14 +529,10 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
       onClick={toggleMute}><MicMutedGlyph /></Button></span>
   )
   if (phase === 'requesting' || phase === 'recording' || phase === 'transcribing') {
-    // The button stays live in every phase. While a turn is in flight the
-    // microphone is open (mid-turn words queue), so the button is the stop
-    // square: it stops the turn, drops the in-flight utterance (a clean
-    // break) and exits speech mode, exactly like the idle stop square. Out
-    // of a turn it is the cross (end the utterance) or the cancel
-    // (requesting / transcribing).
-    const stopTurnSquare = running && phase !== 'requesting'
-    const label = stopTurnSquare ? t('stopGenerating') : phase === 'recording' ? t('voiceChat.stop') : t('cancel')
+    // The cross is the one stop control, in every phase: it halts whatever
+    // is happening — the turn, the speech, the in-flight words — and ends
+    // the voice conversation, back to the plain dictate + waveform row.
+    const label = running ? t('stopGenerating') : t('stopVoiceChat')
     return (
       <span className={css.voiceChatPair} ref={cardRef} data-voice-live="1">
         {muteButton}
@@ -554,17 +541,15 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
             aria-label={label}
             onMouseDown={(event) => { event.preventDefault() }}
             onClick={() => {
-              if (stopTurnSquare) {
-                // The stop is the "further notice" for speech mode, exactly
-                // like the idle stop square: the reply stops, the
-                // in-flight utterance is dropped, and the conversation row
-                // returns.
-                stopTurn(sessionId); cancel(); setArmed(false); turnEndedAt.current = undefined; sawSpeech.current = false
-                return
-              }
-              if (phase === 'recording' && !running) void finish(); else cancel()
+              // One stop control: whatever is running — the turn, the reply's
+              // speech, the utterance — stops now, and the voice conversation
+              // ends with it, exactly like the idle stop row below.
+              if (running) stopTurn(sessionId)
+              if (speaking) stopSpeaking()
+              cancel()
+              setArmed(false); turnEndedAt.current = undefined; sawSpeech.current = false
             }}>
-            {stopTurnSquare ? <StopSquareGlyph /> : phase === 'transcribing' ? <StateDot state="ongoing" /> : phase === 'recording' ? <CloseGlyph /> : <VoiceChatGlyph />}</Button></span>
+            <CloseGlyph /></Button></span>
         </Tooltip>
       </span>
     )
@@ -626,7 +611,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
           if (voiceMode) { if (usable) void start(); else setSetupOpen(true); return }
           if (!sendDisabled) { beginTurn(); inputActions.submit() }
         }}>
-        {stopMode ? <StopSquareGlyph /> : voiceMode ? <VoiceChatGlyph /> : <SendArrowGlyph />}</Button></span>
+        {stopMode ? <CloseGlyph /> : voiceMode ? <VoiceChatGlyph /> : <SendArrowGlyph />}</Button></span>
     </Tooltip>
     <VoiceSetupDialog open={setupOpen && !usable}
       needsInstallation={readiness.connected && provider?.location === 'host-local' && provider.preparation.phase === 'unprepared'}
