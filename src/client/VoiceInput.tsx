@@ -108,6 +108,10 @@ const VOICE_RMS = 0.02
 const SILENCE_MS = 2000
 const NO_SPEECH_MS = 15000
 const VAD_TICK_MS = 250
+/** Peak level over the whole no-speech window: below this, the input
+ *  delivered digital silence (a dead or misrouted device) rather than a
+ *  merely quiet room, so the feedback names the input device. */
+const SILENT_MIC_PEAK = 0.001
 /** Continuous listening: reopen the mic this long after a reply ends, when no
  *  reply speech is expected (device muted). */
 const LISTEN_SETTLE_MS = 3000
@@ -188,6 +192,8 @@ interface ActiveRecording {
   vadLastVoice?: number
   /** True when continuous listening opened this turn (no tap behind it). */
   autoOpen?: boolean
+  /** Highest level heard since the tap: a dead input endpoint sits at 0. */
+  peakAmp?: number
 }
 
 async function disposeRecording(capture: Recording): Promise<void> {
@@ -418,7 +424,7 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     const run = ++generation.current
     const active: ActiveRecording = { capture: createRecording(), abort: new AbortController(),
       span: inputActions.captureInsertion(), selection: catalog.selection,
-      maxDurationSeconds: catalog.maxDurationSeconds, maxAudioBytes: catalog.maxAudioBytes, phase: 'requesting', autoOpen }
+      maxDurationSeconds: catalog.maxDurationSeconds, maxAudioBytes: catalog.maxAudioBytes, phase: 'requesting', autoOpen, peakAmp: 0 }
     current.current = active
     setMessage(''); setPhase('requesting')
     try {
@@ -460,7 +466,9 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
         active.vadLastVoice = now
         return
       }
-      if (active.capture.amplitude() >= VOICE_RMS) {
+      const level = active.capture.amplitude()
+      if (level > (active.peakAmp ?? 0)) active.peakAmp = level
+      if (level >= VOICE_RMS) {
         if (active.vadHeardAt === undefined) active.vadHeardAt = now
         active.vadLastVoice = now
         return
@@ -472,7 +480,10 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
           // until the user says otherwise, and the max-duration timer
           // re-arms it quietly when the buffer has grown too stale.
           if (active.autoOpen) return
-          cancel(); feedback(t('interrupted'))
+          // A live microphone, even in a silent room, never sits at zero:
+          // near-zero peak means the device delivered digital silence, so
+          // point at the input device instead of a blind retry.
+          cancel(); feedback((active.peakAmp ?? 0) < SILENT_MIC_PEAK ? t('micSilent') : t('interrupted'))
         }
         return
       }
