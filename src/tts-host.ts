@@ -168,6 +168,7 @@ function serverEnv(): NodeJS.ProcessEnv {
     VOICE_CHAT_BIN_DIR: BIN_DIR,
     VOICE_CHAT_REF_DIR: REF_DIR,
     VOICE_CHAT_STATE_DIR: path.join(os.homedir(), '.dsh', 'voice-chat', 'state'),
+    VOICE_CHAT_PRELOAD_ENGINE: selectedEngine(),
   }
 }
 

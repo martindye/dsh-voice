@@ -80,6 +80,14 @@ with lightningcss and injected as self-managed style tags.
   qwen3 when its models are present.
 - Host log: `~/.dsh/logs/voice-tts.log`.
 
+With Pocket selected, only the CPU engine is warmed when the TTS server starts.
+A failed Pocket request does not fall back to a GPU engine. Selecting qwen3
+still enables the GPU engine and retains its CPU fallback. The host passes the
+selected registry name through `VOICE_CHAT_PRELOAD_ENGINE`; a standalone server
+or an older host defaults its warm-up to Pocket. GPU requests remain available
+on demand. Run `python -m unittest discover -s tests -p 'test_tts_server.py'`
+for the model-free startup and fallback checks.
+
 ## Installing (bundle)
 
 The package declares a `dsh.bundle` with `cordis.patch.yml`. Adding the

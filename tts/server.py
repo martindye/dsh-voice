@@ -12,6 +12,7 @@ the environment before spawning:
     VOICE_CHAT_BIN_DIR      bin directory (tts-server.exe lives there)
     VOICE_CHAT_REF_DIR      reference-voice directory
     VOICE_CHAT_STATE_DIR    server state/logs (default ~/.dsh/voice-chat/state)
+    VOICE_CHAT_PRELOAD_ENGINE selected registry engine (default pocket)
 
 Endpoints (loopback only by design — unauthenticated synthesis endpoint):
     GET  /health  -> {"ok": true, "engines": {name: {loaded, voices, default_voice}}}
@@ -125,12 +126,14 @@ class Handler(BaseHTTPRequestHandler):
             if engine is None:
                 return self._json(500, {"ok": False,
                                         "error": "no TTS engines available"})
-        # Try the chosen engine first, then the rest in registry order: a GPU
-        # engine that cannot load right now (VRAM taken by the LLM) falls back
-        # to the next engine instead of erroring, so the device gets a voice.
+        # CPU selection must not start a GPU engine, even if CPU synthesis fails.
+        # GPU selection can still fall back to the CPU engine.
         tried = []
         samples = rate = None
-        for cand in [engine] + [e for e in engine_list() if e is not engine]:
+        candidates = [engine]
+        if engine.name != "pocket":
+            candidates += [e for e in engine_list() if e is not engine]
+        for cand in candidates:
             try:
                 cand.load()
                 samples, rate = cand.synthesize(text, voice)
@@ -160,19 +163,23 @@ def _default_voice(engine) -> str:
 
 
 def _preload() -> None:
-    """Warm every engine so the first /tts is a render, not a model load.
+    """Warm the selected engine; leave other engines available on demand.
 
     Runs in a background thread: /health already serves, and a live request
     waits on the engine's own load guard.
     """
-    from engines import engines as engine_list
-    for eng in engine_list():
-        try:
-            eng.load()
-            samples, _ = eng.synthesize("Ready.", None)
-            log.info("preloaded %s (%d warm-up samples)", eng.name, samples.size)
-        except Exception:
-            log.exception("preload failed for engine %s", eng.name)
+    from engines import get
+    selected = os.environ.get("VOICE_CHAT_PRELOAD_ENGINE", "pocket")
+    eng = get(selected)
+    if eng is None:
+        log.warning("unknown preload engine %s; leaving engines lazy", selected)
+        return
+    try:
+        eng.load()
+        samples, _ = eng.synthesize("Ready.", None)
+        log.info("preloaded %s (%d warm-up samples)", eng.name, samples.size)
+    except Exception:
+        log.exception("preload failed for engine %s", eng.name)
 
 
 def main() -> int:
