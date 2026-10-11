@@ -22,6 +22,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as zlib from 'node:zlib'
 import { splitSentences } from './sentences.ts'
+import { budgetTurnText } from './turn-text.ts'
 
 const PLUGIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SERVER_PY = path.join(PLUGIN_DIR, 'tts', 'server.py')
@@ -282,37 +283,65 @@ function eventTime(t: unknown): number {
 interface SessionEvent {
   type?: string
   time?: unknown
-  data?: { message?: { id?: string; content?: unknown } }
+  data?: { turn?: number; message?: { id?: string; content?: unknown } }
 }
 
-/** Resolve one assistant message's visible text from the session log. */
-function resolveMessage(sessionId: string, messageId: string): { text: string; time: number } {
+type ReadScope = 'final' | 'steps'
+
+/** The visible text of one assistant message (all its text blocks, in order). */
+function messageText(ev: SessionEvent): string {
+  const content = ev.data?.message?.content
+  if (!Array.isArray(content)) return ''
+  return content
+    .filter((b): b is { type: string; text: string } => !!b && (b as { type?: string }).type === 'text'
+      && typeof (b as { text?: unknown }).text === 'string')
+    .map((b) => (b as { text: string }).text)
+    .join('\n')
+}
+
+/**
+ * Resolve the speakable text of a reply from the session log.
+ * 'final' (default) reads only the message itself — the turn's last answer.
+ * 'steps' reads every assistant step of the same turn in order, capped by
+ * TTS_MAX_CHARS with the final answer keeping priority (budgetTurnText).
+ */
+function resolveMessage(sessionId: string, messageId: string, scope: ReadScope = 'final'): { text: string; time: number } {
   const file = findSessionFile(sessionId)
   if (!file) throw new Error(`session ${sessionId} not found on this host`)
   const buf = readFileSync(file)
   const { frames } = scanZstdFrames(buf)
   const zstdDecompressSync = (zlib as { zstdDecompressSync?: (b: Buffer) => Buffer }).zstdDecompressSync
   if (!zstdDecompressSync) throw new Error('this host\'s Node build cannot read zstd session logs')
-  for (let i = frames.length - 1; i >= 0; i--) {
+  const events: SessionEvent[] = []
+  for (const frame of frames) {
     let text: string
-    try { text = zstdDecompressSync(buf.subarray(frames[i].start, frames[i].end)).toString('utf8') } catch { continue }
+    try { text = zstdDecompressSync(buf.subarray(frame.start, frame.end)).toString('utf8') } catch { continue }
     for (const line of text.split('\n')) {
       if (!line.trim()) continue
-      let ev: SessionEvent
-      try { ev = JSON.parse(line) as SessionEvent } catch { continue }
-      if (ev.type !== 'assistant/message') continue
-      const message = ev.data?.message
-      if (!message || message.id !== messageId) continue
-      const content = Array.isArray(message.content) ? message.content : []
-      const spoken = content
-        .filter((b): b is { type: string; text: string } => !!b && (b as { type?: string }).type === 'text'
-          && typeof (b as { text?: unknown }).text === 'string')
-        .map((b) => (b as { text: string }).text)
-        .join('\n')
-      return { text: spoken, time: eventTime(ev.time) }
+      try { events.push(JSON.parse(line) as SessionEvent) } catch { continue }
     }
   }
-  throw new Error(`message ${messageId} not found in the session log`)
+  // The newest occurrence wins (matches the previous newest-first scan).
+  let target: { ev: SessionEvent; index: number } | null = null
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i]
+    if (ev.type === 'assistant/message' && ev.data?.message?.id === messageId) { target = { ev, index: i }; break }
+  }
+  if (!target) throw new Error(`message ${messageId} not found in the session log`)
+  const targetText = messageText(target.ev)
+  const time = eventTime(target.ev.time)
+  if (scope !== 'steps') return { text: targetText, time }
+  const turn = target.ev.data?.turn
+  if (turn === undefined) return { text: targetText, time }
+  const parts: string[] = []
+  for (let i = 0; i <= target.index; i++) {
+    const ev = events[i]
+    if (ev.type !== 'assistant/message' || ev.data?.turn !== turn) continue
+    const text = messageText(ev).trim()
+    if (text) parts.push(text)
+  }
+  if (parts.length === 0) return { text: targetText, time }
+  return { text: budgetTurnText(parts, TTS_MAX_CHARS), time }
 }
 
 /** Strip the parts of a reply that must never be spoken. */
@@ -338,6 +367,8 @@ interface SynthesizeRequest {
   sessionId?: string
   messageId?: string
   auto?: boolean
+  /** 'steps' speaks the whole turn (intermediate steps + final answer). */
+  scope?: 'final' | 'steps'
 }
 
 class TtsController {
@@ -391,9 +422,10 @@ class TtsController {
     const sessionId = request?.sessionId
     const messageId = request?.messageId
     const auto = !!request?.auto
-    log(`synthesize start: session=${sessionId} message=${messageId} auto=${auto}`)
+    const scope = request?.scope
+    log(`synthesize start: session=${sessionId} message=${messageId} auto=${auto} scope=${scope ?? 'final'}`)
     if (!sessionId || !messageId) throw new Error('synthesize requires sessionId and messageId')
-    const { text, time } = resolveMessage(sessionId, messageId)
+    const { text, time } = resolveMessage(sessionId, messageId, scope)
     let prepared = prepForSpeech(text)
     if (!prepared) throw new Error('that message has no speakable text')
     if (prepared.length > TTS_MAX_CHARS) prepared = `${prepared.slice(0, TTS_MAX_CHARS).trimEnd()}...`
@@ -430,15 +462,16 @@ class TtsController {
    * starves). The freshness check lives here, once, not per sentence.
    */
   async plan(
-    request: { sessionId?: string; messageId?: string; auto?: boolean },
+    request: { sessionId?: string; messageId?: string; auto?: boolean; scope?: 'final' | 'steps' },
     signal?: { throwIfAborted?: () => void },
   ): Promise<Record<string, unknown>> {
     signal?.throwIfAborted?.()
     const sessionId = request?.sessionId
     const messageId = request?.messageId
     const auto = !!request?.auto
+    const scope = request?.scope
     if (!sessionId || !messageId) throw new Error('plan requires sessionId and messageId')
-    const { text, time } = resolveMessage(sessionId, messageId)
+    const { text, time } = resolveMessage(sessionId, messageId, scope)
     let prepared = prepForSpeech(text)
     if (!prepared) throw new Error('that message has no speakable text')
     if (prepared.length > TTS_MAX_CHARS) prepared = `${prepared.slice(0, TTS_MAX_CHARS).trimEnd()}...`

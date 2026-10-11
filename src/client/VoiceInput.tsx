@@ -8,6 +8,7 @@ import type { TranscriptionRequest } from '@deepseek-ai/dsh-experimental-api-spe
 import type { SpeechPreparationOptions, SpeechProviderId, SpeechSelection, SpeechSelectionPatch, Transcript } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { RecordingError, audioBase64, type Recording } from './audio.ts'
+import { applyDictationFlag } from './dictation-flag.ts'
 import { runningChanged, speechStarted, voiceEnded } from './metrics.ts'
 import type { SpeechReadiness } from './readiness.ts'
 import { VoiceSetupDialog } from './VoiceSetupDialog.tsx'
@@ -393,7 +394,10 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
         feedback(t('listeningPaused'))
         return
       }
-      inputActions.setDraft(result.value.text); beginTurn(); inputActions.submit(); current.current = undefined; setPhase('idle')
+      // The transcript goes out straight from the recognizer: this is the
+      // one path whose words were spoken, so it (and only it) may carry the
+      // dictated-message flag the settings card turns on.
+      inputActions.setDraft(applyDictationFlag(result.value.text)); beginTurn(); inputActions.submit(); current.current = undefined; setPhase('idle')
       setArmed(true)
     } catch (failure) {
       if (failure instanceof RecordingError && failure.kind === 'empty' && run === generation.current) {

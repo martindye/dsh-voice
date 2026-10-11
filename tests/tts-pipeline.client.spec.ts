@@ -91,7 +91,7 @@ describe('sentence pipeline', () => {
       expect(ctx.started.length).toBe(3)
     }, { timeout: 3000, interval: 10 })
 
-    expect(plans).toEqual([{ sessionId: 's1', messageId: 'm1', auto: false }])
+    expect(plans).toEqual([{ sessionId: 's1', messageId: 'm1', auto: false, scope: 'final' }])
     expect(fake.renders.map((r) => r.text)).toEqual(['One one.', 'Two two.', 'Three three.'])
     // Back-to-back: 0.08 start, then +2 s (the fake duration) each.
     expect(ctx.started[0]?.at).toBeCloseTo(0.08, 5)
@@ -139,7 +139,7 @@ describe('sentence pipeline', () => {
 
     const outcome = await speak('s3', 'm3', { auto: false })
     expect(outcome).toEqual({ audio: true })
-    expect(synthesized).toEqual([{ sessionId: 's3', messageId: 'm3', auto: false }])
+    expect(synthesized).toEqual([{ sessionId: 's3', messageId: 'm3', auto: false, scope: 'final' }])
     await vi.waitFor(() => {
       expect((ctx as { started?: Started[] }).started?.length).toBe(1)
     }, { timeout: 3000, interval: 10 })
@@ -161,6 +161,22 @@ describe('sentence pipeline', () => {
     expect(outcome).toEqual({ stale: true })
     expect(fake.renders).toHaveLength(0)
     expect(isPlaying()).toBe(false)
+  })
+
+  it('passes the read scope through to plan', async () => {
+    const ctx = makeCtx()
+    holder.ctx = ctx
+    const plans: unknown[] = []
+    const fake = fakeRemote(['One.'])
+    const planSpy = async (request: unknown): Promise<unknown> => {
+      plans.push(request)
+      return { stale: false, sentences: ['One.'] }
+    }
+    setTtsRemote({ tts: { ...fake.remote, plan: planSpy } } as never)
+
+    await speak('s7', 'm7', { auto: true, scope: 'steps' })
+    expect(plans).toEqual([{ sessionId: 's7', messageId: 'm7', auto: true, scope: 'steps' }])
+    stopPlayback()
   })
 
   it('folds a gapping follow-on into one render block', async () => {

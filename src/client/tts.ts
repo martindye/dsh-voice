@@ -96,8 +96,8 @@ export type VoiceEngineChoice = 'pocket' | 'qwen3'
  */
 interface TtsNamespace {
   status(): Promise<unknown>
-  synthesize(request: { sessionId: string; messageId: string; auto: boolean }, signal?: unknown): Promise<unknown>
-  plan(request: { sessionId: string; messageId: string; auto: boolean }, signal?: unknown): Promise<unknown>
+  synthesize(request: { sessionId: string; messageId: string; auto: boolean; scope?: 'final' | 'steps' }, signal?: unknown): Promise<unknown>
+  plan(request: { sessionId: string; messageId: string; auto: boolean; scope?: 'final' | 'steps' }, signal?: unknown): Promise<unknown>
   render(request: { text: string }, signal?: unknown): Promise<unknown>
   setEngine(engine: VoiceEngineChoice): Promise<unknown>
 }
@@ -409,6 +409,26 @@ export function voiceChatMode(): boolean {
   try { return localStorage.getItem(VOICE_CHAT_KEY) === '1' } catch { return false }
 }
 
+/* -------------------------------------------- what gets read aloud (scope) */
+
+/**
+ * What a device reads aloud: 'final' is the turn's last answer only (the
+ * historical behaviour); 'steps' also speaks the intermediate steps, in
+ * order, ending with the final answer. Stored per browser; never leaves it.
+ */
+export type AutoReadScope = 'final' | 'steps'
+
+const READ_SCOPE_KEY = 'dsh-voice-output:read-scope'
+
+export function autoReadScope(): AutoReadScope {
+  try { return localStorage.getItem(READ_SCOPE_KEY) === 'steps' ? 'steps' : 'final' } catch { return 'final' }
+}
+
+export function setAutoReadScope(scope: AutoReadScope): void {
+  try { localStorage.setItem(READ_SCOPE_KEY, scope) } catch { /* best effort */ }
+  emit()
+}
+
 /* ---------------------------------------------------------------- speak */
 
 /** Message ids already considered for auto-read (once per browser per message). */
@@ -440,7 +460,7 @@ export interface SpeakOutcome {
 export async function speak(
   sessionId: string,
   messageId: string,
-  opts: { auto?: boolean } = {},
+  opts: { auto?: boolean; scope?: 'final' | 'steps' } = {},
 ): Promise<SpeakOutcome> {
   if (!ns) {
     lastError = 'tts remote not ready (page reload needed?)'
@@ -451,7 +471,7 @@ export async function speak(
     const remote = ns
     let plan: unknown
     try {
-      plan = await remote.plan({ sessionId, messageId, auto: !!opts.auto })
+      plan = await remote.plan({ sessionId, messageId, auto: !!opts.auto, scope: opts.scope ?? 'final' })
     } catch (error) {
       lastError = String((error as { message?: unknown })?.message ?? error)
       console.warn('[dsh-voice tts] plan failed:', error)
@@ -488,7 +508,7 @@ export async function speak(
     return { error: lastError }
   }
   try {
-    const r = (await ns.synthesize({ sessionId, messageId, auto: !!opts.auto })) as
+    const r = (await ns.synthesize({ sessionId, messageId, auto: !!opts.auto, scope: opts.scope ?? 'final' })) as
       | { ok?: boolean; value?: { audioBase64?: string; stale?: boolean; elapsedMs?: number }; error?: { message?: string; code?: unknown } }
       | { audioBase64?: string; stale?: boolean; elapsedMs?: number }
     const envelope = r && typeof r === 'object' && 'ok' in r ? r : { ok: true, value: r }

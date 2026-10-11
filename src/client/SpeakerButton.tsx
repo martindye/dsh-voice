@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { unlockPageAudio } from './audio-unlock.ts'
 import {
-  currentError, deviceOn, isPlaying, markMessageHandled, messageHandled,
+  autoReadScope, currentError, deviceOn, isPlaying, markMessageHandled, messageHandled,
   speak, stopPlayback, subscribeTts, voiceChatMode,
 } from './tts.ts'
 import css from './VoiceInput.module.css'
@@ -51,7 +51,7 @@ export function SpeakerButton({ messageId, sessionId, t }: SpeakerButtonProps) {
     if (messageHandled(messageId)) return
     markMessageHandled(messageId)
     if (!deviceOn() || !voiceChatMode()) return
-    void speak(sessionId, messageId, { auto: true })
+    void speak(sessionId, messageId, { auto: true, scope: autoReadScope() })
   }, [messageId, sessionId])
 
   const playing = isPlaying()
@@ -64,7 +64,7 @@ export function SpeakerButton({ messageId, sessionId, t }: SpeakerButtonProps) {
     unlockPageAudio()
     busyRef.current = true
     setBusy(true)
-    void speak(sessionId, messageId, { auto: false }).finally(() => {
+    void speak(sessionId, messageId, { auto: false, scope: autoReadScope() }).finally(() => {
       busyRef.current = false
       setBusy(false)
     })

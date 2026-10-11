@@ -4,8 +4,9 @@ import { Button, DisclosureRow, IconChevronDownOutlineRegular, StateDot, type St
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SpeechPreparationState, SpeechProviderId, SpeechProviderView, SpeechSelectionPatch } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
 import type { VoiceInputInjected } from './VoiceInput.tsx'
-import { setSpeechEngine, ttsStatus, type VoiceEngineChoice } from './tts.ts'
+import { autoReadScope, setAutoReadScope, setSpeechEngine, ttsStatus, type AutoReadScope, type VoiceEngineChoice } from './tts.ts'
 import { NS } from './locales.ts'
+import { MARKER_PRESETS, dictationFlagMode, dictationMarker, setDictationFlagMode, setDictationMarker, type DictationFlagMode } from './dictation-flag.ts'
 import css from './VoiceInput.module.css'
 
 /** One recognizer's resource readiness and explicit preparation controls. */
@@ -144,6 +145,9 @@ export function VoicePreparation({ useSpeechReadiness, ...props }: Pick<InjectFa
   }
   const [voiceEngine, setVoiceEngine] = useState<VoiceEngineChoice>(ttsStatus().engine === 'qwen3ggufbase' ? 'qwen3' : 'pocket')
   const [voiceBusy, setVoiceBusy] = useState(false), [voiceNote, setVoiceNote] = useState('')
+  const [readScope, setReadScope] = useState<AutoReadScope>(autoReadScope())
+  const [flagMode, setFlagMode] = useState<DictationFlagMode>(dictationFlagMode())
+  const [flagMarker, setFlagMarker] = useState<string>(dictationMarker())
   const changeVoice = async (engine: VoiceEngineChoice) => {
     setVoiceBusy(true); setVoiceNote('')
     try {
@@ -173,6 +177,24 @@ export function VoicePreparation({ useSpeechReadiness, ...props }: Pick<InjectFa
         <option value="pocket">{props.t('voiceCpu')}</option>
         <option value="qwen3">{props.t('voiceGpu')}</option>
       </select></label>
+      <small className={css.metric} role="note">
+        {voiceEngine === 'qwen3' ? props.t('voiceDetailQwen3') : props.t('voiceDetailPocket')}
+      </small>
+      <label>{props.t('readScope')}<select value={readScope}
+        onChange={(event) => { const v = event.target.value as AutoReadScope; setReadScope(v); setAutoReadScope(v) }}>
+        <option value="final">{props.t('readScopeFinal')}</option>
+        <option value="steps">{props.t('readScopeSteps')}</option>
+      </select></label>
+      <label>{props.t('dictationFlag')}<select value={flagMode}
+        onChange={(event) => { const v = event.target.value as DictationFlagMode; setFlagMode(v); setDictationFlagMode(v) }}>
+        <option value="off">{props.t('dictationFlagOff')}</option>
+        <option value="marker">{props.t('dictationFlagMarker')}</option>
+        <option value="sidecar">{props.t('dictationFlagSidecar')}</option>
+      </select></label>
+      {flagMode === 'marker' && <label>{props.t('dictationMarker')}<select value={flagMarker}
+        onChange={(event) => { setFlagMarker(event.target.value); setDictationMarker(event.target.value) }}>
+        {MARKER_PRESETS.map(preset => <option key={preset} value={preset}>{preset}</option>)}
+      </select></label>}
       {voiceNote && <small className={css.metric} role="status">{voiceNote}</small>}
       <p>{props.t(selected?.location === 'cloud' ? 'cloud' : 'local')}</p>
       {error && <p role="alert">{props.t('failed', { message: error })}</p>}

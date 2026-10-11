@@ -28,6 +28,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Transcript } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { VoiceInput, type VoiceInputProps } from '../src/client/VoiceInput.tsx'
+import { MARKER_PRESETS } from '../src/client/dictation-flag.ts'
 import { setMetricsSink } from '../src/client/metrics.ts'
 import { Recording } from '../src/client/audio.ts'
 
@@ -305,6 +306,24 @@ it('converses two turns with no focus events: the rhythm is clean', async () => 
     expect(line).toMatchObject({ toAgentMs: expect.any(Number), thinkMs: expect.any(Number) })
     expect((line as { toAgentMs: number }).toAgentMs).toBeGreaterThanOrEqual(0)
     expect((line as { thinkMs: number }).thinkMs).toBeGreaterThanOrEqual(0)
+  }
+}, 60000)
+
+it('marks the dictated transcript when the flag is on: the tag travels with the draft', async () => {
+  currentTest = 'dictation flag'
+  localStorage.setItem('dsh-voice:dictation-flag-mode', 'marker')
+  try {
+    const s = makeSim()
+    watch(s.container, 'mount')
+    await startTurn(s)
+    await speak(s)
+    await waitSubmitted(s)
+    // The transcript goes out with the chosen marker line in front, the
+    // words themselves intact — and the typed-draft path is never involved.
+    expect(s.inputActions.setDraft).toHaveBeenCalledWith(`${MARKER_PRESETS[0]}\n\n${transcript.text}`)
+    expect(s.inputActions.submit).toHaveBeenCalled()
+  } finally {
+    localStorage.removeItem('dsh-voice:dictation-flag-mode')
   }
 }, 60000)
 
