@@ -1,0 +1,25 @@
+# Publishing @martindye/dsh-voice
+
+The npm account uses a **stage-only** granular token: a plain `npm publish`
+is rejected by design, so every version goes through npm's staged-publish
+gate.
+
+## Flow
+1. Make the changes, pass the tests (`pnpm test`), rebuild (`pnpm bundle`).
+2. Bump `version` in package.json (semver) and commit.
+3. From the repo root: `npm stage publish` (token lives in `~/.npmrc`;
+   this step needs no 2FA).
+4. Martin approves the version in the **Staged Packages** tab on
+   npmjs.com — that step needs his 2FA. The version goes live on the
+   registry the moment it is approved.
+
+## Pack contents
+The `files` whitelist in package.json (src, lib, cordis.patch.yml,
+README.md, THIRD-PARTY.md, tts, bin, ref_voices) narrowed by `.npmignore`
+(tests, logs, build scratch). `bin/tts-server.exe` is included on purpose
+— it is the pocket TTS engine — which is why the tarball is ~55 MB.
+
+## Version history
+- 1.0.1 (22/10): first public version (renamed from @martin/dsh-voice).
+- 1.0.2 (22/10): webm-header decode fix for muted runs; mute button
+  removed from the error row; this file.
