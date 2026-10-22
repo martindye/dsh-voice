@@ -1,5 +1,5 @@
 /**
- * Host half of @martin/dsh-voice.
+ * Host half of @martindye/dsh-voice.
  *
  * Two services are provided to the browser:
  *  - voiceMetrics: one JSON line per completed voice turn, appended to

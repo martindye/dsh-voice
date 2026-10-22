@@ -37,15 +37,15 @@ function passThroughCodec(typeSymbol: string): unknown {
 
 /** The plugin's own tiny Remote: one voice-turn latency line to the host log. */
 const METRICS_REMOTE = {
-  package: '@martin/dsh-voice',
+  package: '@martindye/dsh-voice',
   descriptors: [{
-    id: '@martin/dsh-voice#voiceMetrics/log',
+    id: '@martindye/dsh-voice#voiceMetrics/log',
     service: 'voiceMetricsController',
     namespace: 'voiceMetrics',
     method: 'log',
     invocation: { kind: 'direct' },
-    parameters: [{ name: 'entry', wire: 'entry', source: 'json', codec: passThroughCodec('@martin/dsh-voice#MetricEntry') }],
-    result: passThroughCodec('@martin/dsh-voice#MetricResult'),
+    parameters: [{ name: 'entry', wire: 'entry', source: 'json', codec: passThroughCodec('@martindye/dsh-voice#MetricEntry') }],
+    result: passThroughCodec('@martindye/dsh-voice#MetricResult'),
   }],
 } as const
 
@@ -95,7 +95,7 @@ function registerUi(ctx: Context): void {
   ctx.effect(() => readiness.dispose)
   ctx.effect(() => async () => { await Promise.all([...recordings].map(recording => recording.dispose())) })
   const actions: VoiceInputInjected = {
-    openSettings: () => { ctx.pluginNavigation.openBundle('@martin/dsh-voice') },
+    openSettings: () => { ctx.pluginNavigation.openBundle('@martindye/dsh-voice') },
     stopTurn: (sessionId: SessionId) => {
       // Preferred: the app's own stop button. It stays in the DOM while a
       // turn runs (the unified-button CSS only hides it) and is wired to the
@@ -132,10 +132,10 @@ function registerUi(ctx: Context): void {
   // The Plugins page dispatches these keyed slots by the installed bundle's
   // package name, so the cards register under this plugin's own name.
   ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({ name: 'plugins.bundle.config',
-    key: '@martin/dsh-voice', locale: NS, inject: () => actions,
+    key: '@martindye/dsh-voice', locale: NS, inject: () => actions,
   }, VoicePreparation))
   ctx.slots.inject('plugins.bundle.activation', () => ctx.slots.register({ name: 'plugins.bundle.activation',
-    key: '@martin/dsh-voice', locale: NS, inject: () => actions,
+    key: '@martindye/dsh-voice', locale: NS, inject: () => actions,
   }, VoiceSetupPrompt))
   // Output side: a speaker button on each finalized assistant message and a
   // per-device auto-read toggle in the session header corner.

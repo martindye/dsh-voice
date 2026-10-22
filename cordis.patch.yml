@@ -1,4 +1,4 @@
-# @martin/dsh-voice — self-contained two-way voice for the DSH web app.
+# @martindye/dsh-voice — self-contained two-way voice for the DSH web app.
 #
 # One bundle for the whole voice round-trip:
 #   in : the unified voice composer (this plugin's ui-voice slot)
@@ -10,7 +10,7 @@
   disabled: true
 - insert:
   - id: ui-voice
-    name: '@martin/dsh-voice'
+    name: '@martindye/dsh-voice'
   - id: speech-to-text
     name: '@deepseek-ai/dsh-experimental-speech-to-text'
     config:

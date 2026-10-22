@@ -1,4 +1,4 @@
-"""@martin/dsh-voice — TTS server: one HTTP surface for every engine.
+"""@martindye/dsh-voice — TTS server: one HTTP surface for every engine.
 
 Standalone vendoring of voice_stack/tts_server.py (TTSTT) so the plugin can
 supervise its own server without a repository checkout. Text in, audio out,

@@ -26,63 +26,63 @@ function passThroughCodec(typeSymbol: string): unknown {
 
 /** The host's `tts` namespace, hand-written (same contract as the host). */
 export const TTS_REMOTE = {
-  package: '@martin/dsh-voice',
+  package: '@martindye/dsh-voice',
   descriptors: [
     {
-      id: '@martin/dsh-voice#tts/status',
+      id: '@martindye/dsh-voice#tts/status',
       service: 'ttsController',
       namespace: 'tts',
       method: 'status',
       invocation: { kind: 'direct' },
       parameters: [],
-      result: passThroughCodec('@martin/dsh-voice#TtsStatus'),
+      result: passThroughCodec('@martindye/dsh-voice#TtsStatus'),
     },
     {
-      id: '@martin/dsh-voice#tts/synthesize',
+      id: '@martindye/dsh-voice#tts/synthesize',
       service: 'ttsController',
       namespace: 'tts',
       method: 'synthesize',
       invocation: { kind: 'direct' },
       parameters: [
-        { name: 'request', wire: 'request', source: 'json', codec: passThroughCodec('@martin/dsh-voice#SynthesizeRequest') },
+        { name: 'request', wire: 'request', source: 'json', codec: passThroughCodec('@martindye/dsh-voice#SynthesizeRequest') },
       ],
       cancellation: { parameter: 'signal' },
-      result: passThroughCodec('@martin/dsh-voice#SynthesizeResult'),
+      result: passThroughCodec('@martindye/dsh-voice#SynthesizeResult'),
     },
     {
-      id: '@martin/dsh-voice#tts/plan',
+      id: '@martindye/dsh-voice#tts/plan',
       service: 'ttsController',
       namespace: 'tts',
       method: 'plan',
       invocation: { kind: 'direct' },
       parameters: [
-        { name: 'request', wire: 'request', source: 'json', codec: passThroughCodec('@martin/dsh-voice#PlanRequest') },
+        { name: 'request', wire: 'request', source: 'json', codec: passThroughCodec('@martindye/dsh-voice#PlanRequest') },
       ],
       cancellation: { parameter: 'signal' },
-      result: passThroughCodec('@martin/dsh-voice#PlanResult'),
+      result: passThroughCodec('@martindye/dsh-voice#PlanResult'),
     },
     {
-      id: '@martin/dsh-voice#tts/render',
+      id: '@martindye/dsh-voice#tts/render',
       service: 'ttsController',
       namespace: 'tts',
       method: 'render',
       invocation: { kind: 'direct' },
       parameters: [
-        { name: 'request', wire: 'request', source: 'json', codec: passThroughCodec('@martin/dsh-voice#RenderRequest') },
+        { name: 'request', wire: 'request', source: 'json', codec: passThroughCodec('@martindye/dsh-voice#RenderRequest') },
       ],
       cancellation: { parameter: 'signal' },
-      result: passThroughCodec('@martin/dsh-voice#RenderResult'),
+      result: passThroughCodec('@martindye/dsh-voice#RenderResult'),
     },
     {
-      id: '@martin/dsh-voice#tts/setEngine',
+      id: '@martindye/dsh-voice#tts/setEngine',
       service: 'ttsController',
       namespace: 'tts',
       method: 'setEngine',
       invocation: { kind: 'direct' },
       parameters: [
-        { name: 'engine', wire: 'engine', source: 'json', codec: passThroughCodec('@martin/dsh-voice#EngineChoice') },
+        { name: 'engine', wire: 'engine', source: 'json', codec: passThroughCodec('@martindye/dsh-voice#EngineChoice') },
       ],
-      result: passThroughCodec('@martin/dsh-voice#EngineChoiceResult'),
+      result: passThroughCodec('@martindye/dsh-voice#EngineChoiceResult'),
     },
   ],
 } as const

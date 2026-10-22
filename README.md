@@ -5,7 +5,7 @@ the agent replies out loud, and the microphone keeps listening. Works on any
 device the web app runs on (iPhone or PC).
 
 A standalone fork of `@deepseek-ai/dsh-experimental-client-ui-voice-input`
-(0.1.7-rc.2, from the deepseek-harness checkout), renamed `@martin/dsh-voice`
+(0.1.7-rc.2, from the deepseek-harness checkout), renamed `@martindye/dsh-voice`
 and grown into the single voice plugin: composer in, speaker buttons and
 auto-read out. The retired `dsh-voice-chat` kit and the old `dsh-voice-output`
 plugin are both superseded by this repository.
@@ -88,7 +88,26 @@ or an older host defaults its warm-up to Pocket. GPU requests remain available
 on demand. Run `python -m unittest discover -s tests -p 'test_tts_server.py'`
 for the model-free startup and fallback checks.
 
-## Installing (bundle)
+## Installing
+
+From npm (the published package ships prebuilt `lib/` — no build step, no
+build-script permission needed):
+
+```sh
+dsh plugin --profile <profile> add @martindye/dsh-voice
+```
+
+for example `dsh plugin --profile web add @martindye/dsh-voice` for the web
+app. Then restart the web host (or start it) and open the app: the unified
+voice button appears in the composer, and a speaker button on every finalized
+message.
+
+Requirements: DSH 0.1.7+ (web app), Node 22+ on the host, and Python 3 with
+the TTS engine dependencies for the spoken replies (see `tts/`); the browser
+needs microphone permission for dictation, and the speech-to-text models are
+fetched on first use under the DSH home.
+
+## How the bundle works
 
 The package declares a `dsh.bundle` with `cordis.patch.yml`. Adding the
 bundle to a profile's bundles list (the web profile does this in its
@@ -104,9 +123,9 @@ and disables the upstream `ui-voice-input` row. The three `@deepseek-ai/
 dsh-experimental-*speech-to-text*` packages must be installed in the same
 profile (the web profile links them from the deepseek-harness checkout).
 
-`lib/` is intentionally not committed here (local repo, junction-installed);
-run `pnpm bundle` after pulling so the junction serves fresh builds. A page
-refresh picks up the client; the host half needs a web-host restart.
+`lib/` is not committed to git (it is included in the npm tarball); run
+`pnpm bundle` after pulling when working from a checkout. A page refresh
+picks up the client; the host half needs a web-host restart.
 
 ## Retired neighbours
 

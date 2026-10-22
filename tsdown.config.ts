@@ -1,5 +1,5 @@
 /**
- * Standalone build for @martin/dsh-voice.
+ * Standalone build for @martindye/dsh-voice.
  *
  * Two passes, one artifact directory (mirrors the dsh-web platform preset in
  * the deepseek-harness checkout, packages/client/tsdown.client.ts):
@@ -14,7 +14,7 @@ import { basename, dirname, resolve as resolvePath } from 'node:path'
 import { transform } from 'lightningcss'
 import { defineConfig } from 'tsdown'
 
-const ID = '@martin/dsh-voice'
+const ID = '@martindye/dsh-voice'
 
 /** Platform modules and plugin-specific externals the host's module table provides. */
 const EXTERNALS = new Set([
