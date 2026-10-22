@@ -560,7 +560,9 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     <span className={css.activityMessage} role="status" title={message}>{message}</span>
     <Button type="button" className={css.roundButton} size="sm" aria-label={t('retryRecording')} disabled={!usable || locked}
       onClick={() => { void start() }}><IconMicrophoneOutlineRegular size={18} /></Button>
-    {armed && muteButton}
+    {/* No mute here: with the microphone closed, retry mic + mute reads as
+        two confusing microphones. The mute returns whenever a mic actually
+        opens, which is where toggling it matters. */}
   </div>
   // Stop square while a turn is in flight — the session reports it running, OR
   // this plugin sent a message that has not reported running yet — or the
