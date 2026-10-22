@@ -44,6 +44,40 @@ export function audioBase64(bytes: Uint8Array): string {
   return btoa(text)
 }
 
+/** One MediaRecorder timeslice, in seconds: the recorder runs `start(500)`. */
+export const HEADER_SLICE_SECONDS = 0.5
+
+/**
+ * The first slice of a MediaRecorder run: only it carries the webm header,
+ * so a blob built without it does not decode ("Unable to decode audio
+ * data"). A run that opened muted (the persistent in-call mute) discards
+ * that slice with everything else, which is exactly when it is lost.
+ */
+export interface HeaderSlice {
+  chunk: Blob
+  /** The microphone was muted while this slice was captured. */
+  muted: boolean
+  /** The slice was also kept in the tail (it arrived unmuted). */
+  pushed: boolean
+}
+
+/**
+ * Compose the decodable blob for a run. The header slice leads even when it
+ * was captured muted (muted audio is trimmed after decoding, never sent); a
+ * pushed header is already the tail's first slice and stays put.
+ * @returns the blob parts plus the seconds to trim from the decoded head.
+ */
+export function composeRecording(
+  header: HeaderSlice | undefined,
+  tail: Blob[],
+): { parts: Blob[]; trimSeconds: number } {
+  if (header === undefined || header.pushed) return { parts: tail, trimSeconds: 0 }
+  return {
+    parts: [header.chunk, ...tail],
+    trimSeconds: header.muted ? HEADER_SLICE_SECONDS : 0,
+  }
+}
+
 /** One microphone acquisition, including a permission prompt that may settle after cancellation. */
 export class Recording {
   private stream: MediaStream | undefined
@@ -54,6 +88,8 @@ export class Recording {
   private chunks: { blob: Blob; at: number }[] = []
   private lastChunkAt = 0
   private muted = false
+  /** The run's header slice, kept even when muted (see composeRecording). */
+  private header: HeaderSlice | undefined
   private readonly lifetime = new AbortController()
   private disposal: Promise<void> | undefined
 
@@ -111,6 +147,12 @@ export class Recording {
       this.recorder = new MediaRecorder(stream)
       this.recorder.ondataavailable = (event) => {
         if (this.lifetime.signal.aborted || event.data.size === 0) return
+        // The first slice alone carries the webm header. Capture it even
+        // while muted (muted slices are otherwise dropped), or a run that
+        // opens muted can never decode its later, unmuted tail.
+        if (this.header === undefined) {
+          this.header = { chunk: event.data, muted: this.muted, pushed: !this.muted }
+        }
         // The mic is alive whenever real data arrives, muted or not: this
         // stays true even while the analyser is blind (suspended context).
         this.lastChunkAt = Date.now()
@@ -167,15 +209,18 @@ export class Recording {
       })
       this.stream?.getTracks().forEach((track) => { track.stop() })
       this.lifetime.signal.throwIfAborted()
-      const blob = new Blob(this.chunks.map((chunk) => chunk.blob), { type: recorder.mimeType })
+      const { parts, trimSeconds } = composeRecording(this.header, this.chunks.map((chunk) => chunk.blob))
+      const blob = new Blob(parts, { type: recorder.mimeType })
       if (blob.size === 0) throw new RecordingError('empty')
       const decoded = await context.decodeAudioData(await blob.arrayBuffer())
       this.lifetime.signal.throwIfAborted()
       // Keep the newest tail, bounded by the Host limit and the freshness
       // window; anything older (a suspended-tab backlog, a long-open mic)
-      // is dropped instead of being sent for transcription.
-      const keepSeconds = Math.min(decoded.duration, Math.min(maxDurationSeconds, FRESH_WINDOW_MS / 1000))
-      const offsetSeconds = decoded.duration - keepSeconds
+      // is dropped instead of being sent for transcription. A muted header
+      // slice is trimmed as well: its audio never reaches the recognizer.
+      const usable = Math.max(0, decoded.duration - trimSeconds)
+      const keepSeconds = Math.min(usable, Math.min(maxDurationSeconds, FRESH_WINDOW_MS / 1000))
+      const offsetSeconds = trimSeconds + (usable - keepSeconds)
       const offline = new OfflineAudioContext(1, Math.max(1, Math.floor(keepSeconds * 16000)), 16000)
       const source = offline.createBufferSource()
       source.buffer = decoded
@@ -209,6 +254,7 @@ export class Recording {
     this.context = undefined
     this.analyser = undefined
     this.chunks = []
+    this.header = undefined
     try { if (context && context.state !== 'closed') await context.close() }
     finally { this.onDispose() }
   }
