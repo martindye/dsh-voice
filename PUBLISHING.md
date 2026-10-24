@@ -33,4 +33,7 @@ README.md, THIRD-PARTY.md, tts, bin, ref_voices) narrowed by `.npmignore`
   superseded by 1.0.5 the same day — do not approve the 1.0.4 stage.)
 - 1.0.5 (24/10): 1.0.4 with the dictation pause reworked per Martin: the
   default is now 4 s and the range extends to 10 s (options 1, 1.5, 2,
-  3, 4, 5, 10). THE release to approve.
+  3, 4, 5, 10). STAGED — approve this one first.
+- 1.0.6 (24/10): README-only — the npm changelog now carries the version
+  number and that version's publish date per entry instead of the dev
+  date. STAGED — approve after 1.0.5.

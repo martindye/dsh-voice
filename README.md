@@ -129,26 +129,35 @@ picks up the client; the host half needs a web-host restart.
 
 ## Changelog (the 10 latest updates, as of 24/10)
 
-- 24/10 — Two new settings in the settings card: the auto-read freshness
-  cutoff (how old a reply may be and still be read on auto, 30 s to 10
-  min) and the pause that ends dictation (1 to 10 seconds of silence,
-  defaulting to 4 s).
-- 24/10 — A conversation switch no longer kills the voice conversation:
-  coming back restores the row where it left off (armed, muted, parked)
-  and the microphone reopens without a tap.
-- 22/10 — A run that opened muted keeps its webm header, so the later
-  unmuted words decode instead of failing with "unable to decode audio".
-- 22/10 — One microphone in the error row: the mute leaves the retry row
-  and appears only where a mic is actually open.
-- 11/10 — One cross, one job: the cross is the single stop control in
-  every phase — it stops the turn, the speech and the words in flight.
-- 11/10 — A dead input device is named when a recording draws no audio
-  ("check the input device"), instead of a generic retry.
-- 11/10 — Auto-reads queue behind audio that is already playing instead
-  of cutting it off; a manual read or an explicit stop still cuts in.
-- 11/10 — Dictated messages can carry a flag (a marker line or a sidecar
-  note) so they are recognisable in the log; typed messages never do.
-- 10/10 — The microphone stays open while the agent thinks, so words
-  spoken mid-turn are transcribed and queued.
-- 09/10 — Voice activity trusts the recorder only when the analyser is
-  blind (a suspended page), so a quiet room never reads as speech.
+Each entry is the npm version it ships in, with that version's publish
+date (1.0.5 is staged and awaits approval, so it carries its latest
+date for now).
+
+- 1.0.5 (24/10) — Two new settings in the settings card: the auto-read
+  freshness cutoff (how old a reply may be and still be read on auto,
+  30 s to 10 min) and the pause that ends dictation (1 to 10 seconds of
+  silence, defaulting to 4 s).
+- 1.0.5 (24/10) — A conversation switch no longer kills the voice
+  conversation: coming back restores the row where it left off (armed,
+  muted, parked) and the microphone reopens without a tap.
+- 1.0.2 (24/10) — A run that opened muted keeps its webm header, so the
+  later unmuted words decode instead of failing with "unable to decode
+  audio".
+- 1.0.2 (24/10) — One microphone in the error row: the mute leaves the
+  retry row and appears only where a mic is actually open.
+- 1.0.1 (22/10) — One cross, one job: the cross is the single stop
+  control in every phase — it stops the turn, the speech and the words
+  in flight.
+- 1.0.1 (22/10) — A dead input device is named when a recording draws no
+  audio ("check the input device"), instead of a generic retry.
+- 1.0.1 (22/10) — Auto-reads queue behind audio that is already playing
+  instead of cutting it off; a manual read or an explicit stop still
+  cuts in.
+- 1.0.1 (22/10) — Dictated messages can carry a flag (a marker line or a
+  sidecar note) so they are recognisable in the log; typed messages
+  never do.
+- 1.0.1 (22/10) — The microphone stays open while the agent thinks, so
+  words spoken mid-turn are transcribed and queued.
+- 1.0.1 (22/10) — Voice activity trusts the recorder only when the
+  analyser is blind (a suspended page), so a quiet room never reads as
+  speech.
