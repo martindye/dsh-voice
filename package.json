@@ -1,6 +1,6 @@
 {
   "name": "@martindye/dsh-voice",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Martin's self-contained two-way voice plugin for the DSH web app: unified voice composer in, per-message speaker buttons and auto-read out (own TTS server), plus the speech-to-text wiring. Forked from @deepseek-ai/dsh-experimental-client-ui-voice-input 0.1.7-rc.2 and maintained here as a standalone plugin.",
   "author": "Martin Dye",
   "repository": {
