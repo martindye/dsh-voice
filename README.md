@@ -129,6 +129,12 @@ picks up the client; the host half needs a web-host restart.
 
 ## Changelog (the latest updates, by version, as of 24/10)
 
+### 1.0.8 (24/10)
+- Two open tabs no longer both speak: the tabs of one browser now elect a
+  single auto-read speaker (a reboot restores every tab, so both used to
+  read the same reply). The speaker button is unaffected — wherever you
+  click it, it speaks there.
+
 ### 1.0.6 (24/10)
 - The changelog now carries the version and publish date per entry.
 

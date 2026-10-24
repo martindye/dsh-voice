@@ -39,4 +39,11 @@ README.md, THIRD-PARTY.md, tts, bin, ref_voices) narrowed by `.npmignore`
   date. APPROVED and live 24/10.
 - 1.0.7 (24/10): changelog reformat (Martin) — version + date as a
   heading, then the bulleted changes, no version repeated per entry.
-  STAGED — awaiting approval.
+  STAGED — then superseded by 1.0.8 the same day (approve 1.0.8; 1.0.7
+  is stale, like 1.0.3/1.0.4).
+- 1.0.8 (24/10): one auto-read speaker per browser — the tabs of one
+  browser elect a single speaker (BroadcastChannel, lowest live id wins,
+  silent 2.5 s settle for a young tab) so the two tabs a reboot restores
+  no longer both read the same reply; the manual speaker button is never
+  gated. Six new unit tests for the election. STAGED — awaiting
+  approval.

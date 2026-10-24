@@ -8,6 +8,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { unlockPageAudio } from './audio-unlock.ts'
+import { isSpeakerTab } from './speaker-tab.ts'
 import {
   autoReadScope, currentError, deviceOn, isPlaying, markMessageHandled, messageHandled,
   speak, stopPlayback, subscribeTts, voiceChatMode,
@@ -46,11 +47,15 @@ export function SpeakerButton({ messageId, sessionId, t }: SpeakerButtonProps) {
 
   // Auto-read: once per message, only for fresh replies while this device
   // has the toggle on and has used the voice composer (the arm flag).
+  // Across tabs of the same browser, only the elected speaker tab speaks
+  // (a reboot restores every tab, so two of them would otherwise both
+  // read the same reply); the manual button below is never gated.
   useEffect(() => {
     if (!messageId || !sessionId) return
     if (messageHandled(messageId)) return
     markMessageHandled(messageId)
     if (!deviceOn() || !voiceChatMode()) return
+    if (!isSpeakerTab()) return
     void speak(sessionId, messageId, { auto: true, scope: autoReadScope() })
   }, [messageId, sessionId])
 
