@@ -29,4 +29,8 @@ README.md, THIRD-PARTY.md, tts, bin, ref_voices) narrowed by `.npmignore`
   superseded by 1.0.4 the same day — do not approve the 1.0.3 stage.)
 - 1.0.4 (24/10): 1.0.3 plus two settings: the auto-read freshness cutoff
   (30 s-10 min, default 2 min) and the pause that ends dictation
-  (1-5 s, default 2 s), both in the settings card.
+  (1-5 s, default 2 s), both in the settings card. (Staged, then
+  superseded by 1.0.5 the same day — do not approve the 1.0.4 stage.)
+- 1.0.5 (24/10): 1.0.4 with the dictation pause reworked per Martin: the
+  default is now 4 s and the range extends to 10 s (options 1, 1.5, 2,
+  3, 4, 5, 10). THE release to approve.

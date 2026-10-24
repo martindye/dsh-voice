@@ -212,7 +212,9 @@ export function VoicePreparation({ useSpeechReadiness, ...props }: Pick<InjectFa
         <option value={1500}>{props.t('pause1500')}</option>
         <option value={2000}>{props.t('pause2000')}</option>
         <option value={3000}>{props.t('pause3000')}</option>
+        <option value={4000}>{props.t('pause4000')}</option>
         <option value={5000}>{props.t('pause5000')}</option>
+        <option value={10000}>{props.t('pause10000')}</option>
       </select></label>
       {voiceNote && <small className={css.metric} role="status">{voiceNote}</small>}
       <p>{props.t(selected?.location === 'cloud' ? 'cloud' : 'local')}</p>

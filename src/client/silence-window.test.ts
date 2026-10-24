@@ -8,9 +8,9 @@ beforeEach(() => {
 })
 
 describe('the pause that ends dictation (device setting)', () => {
-  it('defaults to the historical 2-second silence', () => {
+  it('defaults to the 4-second pause', () => {
     expect(dictationPauseMs()).toBe(DICTATION_PAUSE_DEFAULT_MS)
-    expect(dictationPauseMs()).toBe(2000)
+    expect(dictationPauseMs()).toBe(4000)
   })
 
   it('keeps the choice per browser', () => {

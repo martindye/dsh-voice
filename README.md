@@ -131,7 +131,8 @@ picks up the client; the host half needs a web-host restart.
 
 - 24/10 — Two new settings in the settings card: the auto-read freshness
   cutoff (how old a reply may be and still be read on auto, 30 s to 10
-  min) and the pause that ends dictation (1-5 seconds of silence).
+  min) and the pause that ends dictation (1 to 10 seconds of silence,
+  defaulting to 4 s).
 - 24/10 — A conversation switch no longer kills the voice conversation:
   coming back restores the row where it left off (armed, muted, parked)
   and the microphone reopens without a tap.

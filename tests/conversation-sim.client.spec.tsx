@@ -27,7 +27,7 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Transcript } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import { VoiceInput, type VoiceInputProps } from '../src/client/VoiceInput.tsx'
+import { resetSessionVoiceStateForTests, VoiceInput, type VoiceInputProps } from '../src/client/VoiceInput.tsx'
 import { MARKER_PRESETS } from '../src/client/dictation-flag.ts'
 import { setMetricsSink } from '../src/client/metrics.ts'
 import { Recording } from '../src/client/audio.ts'
@@ -250,6 +250,7 @@ async function startTurn(s: Sim): Promise<void> {
 }
 
 beforeEach(() => {
+  resetSessionVoiceStateForTests()
   trace.length = 0
   lastKey = ''
   metricLines.length = 0
@@ -426,6 +427,11 @@ it('exits speech mode on stop: the default row returns and the mic does not reop
   watch(s.container, 'turn1 recording')
   await speak(s)
   await waitSubmitted(s)
+  // The idle row is painted by a later scheduler task than the submit
+  // callback; wait for it so the next watch captures the close instead of
+  // sampling the still-live frame. (Safe here: nothing reopens the
+  // microphone until running goes true below.)
+  await waitFor(() => { expect(probe(s.container).live).toBe(false) }, { timeout: 2000, interval: 10 })
   watch(s.container, 'turn1 submitted')
   s.snapshot.running = true; s.rerender()
   // While the agent thinks the microphone stays open (mid-turn words queue)

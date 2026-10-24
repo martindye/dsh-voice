@@ -12,8 +12,8 @@
 
 const PAUSE_KEY = 'dsh-voice:dictation-pause'
 
-/** The historical pause: two seconds of silence ends the dictation. */
-export const DICTATION_PAUSE_DEFAULT_MS = 2_000
+/** The historical pause (two seconds); the device default since 24/10. */
+export const DICTATION_PAUSE_DEFAULT_MS = 4_000
 const DICTATION_PAUSE_MIN_MS = 500
 const DICTATION_PAUSE_MAX_MS = 10_000
 

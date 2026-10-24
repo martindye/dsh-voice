@@ -136,6 +136,11 @@ function armVoiceChat(): void {
  */
 const sessionVoiceState = new Map<SessionId, { armed: boolean, muted: boolean, paused: boolean }>()
 
+/** Test seam: the registry is module-level, so simulated conversations must start clean. */
+export function resetSessionVoiceStateForTests(): void {
+  sessionVoiceState.clear()
+}
+
 /** ChatGPT-style voice glyph: a small audio waveform, shown while a voice turn is starting. */
 function VoiceChatGlyph() {
   return (
