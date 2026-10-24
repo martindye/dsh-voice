@@ -23,3 +23,6 @@ README.md, THIRD-PARTY.md, tts, bin, ref_voices) narrowed by `.npmignore`
 - 1.0.1 (22/10): first public version (renamed from @martin/dsh-voice).
 - 1.0.2 (22/10): webm-header decode fix for muted runs; mute button
   removed from the error row; this file.
+- 1.0.3 (24/10): conversation-switch fix — leaving a voice conversation
+  and coming back restored the row (armed/mute/parked state) instead of
+  a fresh dictate row; the mic reopens without a tap.
