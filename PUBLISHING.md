@@ -25,4 +25,6 @@ README.md, THIRD-PARTY.md, tts, bin, ref_voices) narrowed by `.npmignore`
   removed from the error row; this file.
 - 1.0.3 (24/10): conversation-switch fix — leaving a voice conversation
   and coming back restored the row (armed/mute/parked state) instead of
-  a fresh dictate row; the mic reopens without a tap.
+  a fresh dictate row; the mic reopens without a tap. Plus two settings:
+  the auto-read freshness cutoff (30 s-10 min) and the pause that ends
+  dictation (1-5 s).

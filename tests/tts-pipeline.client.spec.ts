@@ -175,7 +175,9 @@ describe('sentence pipeline', () => {
     setTtsRemote({ tts: { ...fake.remote, plan: planSpy } } as never)
 
     await speak('s7', 'm7', { auto: true, scope: 'steps' })
-    expect(plans).toEqual([{ sessionId: 's7', messageId: 'm7', auto: true, scope: 'steps' }])
+    // An auto-read carries the device's freshness window (the default 2
+    // minutes here); the host declines replies older than it.
+    expect(plans).toEqual([{ sessionId: 's7', messageId: 'm7', auto: true, scope: 'steps', maxAgeMs: 120_000 }])
     stopPlayback()
   })
 

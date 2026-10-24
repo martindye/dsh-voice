@@ -4,7 +4,8 @@ import { Button, DisclosureRow, IconChevronDownOutlineRegular, StateDot, type St
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SpeechPreparationState, SpeechProviderId, SpeechProviderView, SpeechSelectionPatch } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
 import type { VoiceInputInjected } from './VoiceInput.tsx'
-import { autoReadScope, setAutoReadScope, setSpeechEngine, ttsStatus, type AutoReadScope, type VoiceEngineChoice } from './tts.ts'
+import { autoReadFreshnessMs, autoReadScope, setAutoReadFreshnessMs, setAutoReadScope, setSpeechEngine, ttsStatus, type AutoReadScope, type VoiceEngineChoice } from './tts.ts'
+import { dictationPauseMs, setDictationPauseMs } from './silence-window.ts'
 import { NS } from './locales.ts'
 import { MARKER_PRESETS, dictationFlagMode, dictationMarker, setDictationFlagMode, setDictationMarker, type DictationFlagMode } from './dictation-flag.ts'
 import css from './VoiceInput.module.css'
@@ -146,6 +147,8 @@ export function VoicePreparation({ useSpeechReadiness, ...props }: Pick<InjectFa
   const [voiceEngine, setVoiceEngine] = useState<VoiceEngineChoice>(ttsStatus().engine === 'qwen3ggufbase' ? 'qwen3' : 'pocket')
   const [voiceBusy, setVoiceBusy] = useState(false), [voiceNote, setVoiceNote] = useState('')
   const [readScope, setReadScope] = useState<AutoReadScope>(autoReadScope())
+  const [readFreshness, setReadFreshness] = useState<number>(autoReadFreshnessMs())
+  const [dictationPause, setDictationPause] = useState<number>(dictationPauseMs())
   const [flagMode, setFlagMode] = useState<DictationFlagMode>(dictationFlagMode())
   const [flagMarker, setFlagMarker] = useState<string>(dictationMarker())
   const changeVoice = async (engine: VoiceEngineChoice) => {
@@ -185,6 +188,14 @@ export function VoicePreparation({ useSpeechReadiness, ...props }: Pick<InjectFa
         <option value="final">{props.t('readScopeFinal')}</option>
         <option value="steps">{props.t('readScopeSteps')}</option>
       </select></label>
+      <label>{props.t('readFreshness')}<select value={String(readFreshness)}
+        onChange={(event) => { const v = Number(event.target.value); setReadFreshness(v); setAutoReadFreshnessMs(v) }}>
+        <option value={30_000}>{props.t('freshness30')}</option>
+        <option value={60_000}>{props.t('freshness60')}</option>
+        <option value={120_000}>{props.t('freshness120')}</option>
+        <option value={300_000}>{props.t('freshness300')}</option>
+        <option value={600_000}>{props.t('freshness600')}</option>
+      </select></label>
       <label>{props.t('dictationFlag')}<select value={flagMode}
         onChange={(event) => { const v = event.target.value as DictationFlagMode; setFlagMode(v); setDictationFlagMode(v) }}>
         <option value="off">{props.t('dictationFlagOff')}</option>
@@ -195,6 +206,14 @@ export function VoicePreparation({ useSpeechReadiness, ...props }: Pick<InjectFa
         onChange={(event) => { setFlagMarker(event.target.value); setDictationMarker(event.target.value) }}>
         {MARKER_PRESETS.map(preset => <option key={preset} value={preset}>{preset}</option>)}
       </select></label>}
+      <label>{props.t('dictationPause')}<select value={String(dictationPause)}
+        onChange={(event) => { const v = Number(event.target.value); setDictationPause(v); setDictationPauseMs(v) }}>
+        <option value={1000}>{props.t('pause1000')}</option>
+        <option value={1500}>{props.t('pause1500')}</option>
+        <option value={2000}>{props.t('pause2000')}</option>
+        <option value={3000}>{props.t('pause3000')}</option>
+        <option value={5000}>{props.t('pause5000')}</option>
+      </select></label>
       {voiceNote && <small className={css.metric} role="status">{voiceNote}</small>}
       <p>{props.t(selected?.location === 'cloud' ? 'cloud' : 'local')}</p>
       {error && <p role="alert">{props.t('failed', { message: error })}</p>}

@@ -129,6 +129,9 @@ picks up the client; the host half needs a web-host restart.
 
 ## Changelog (the 10 latest updates, as of 24/10)
 
+- 24/10 — Two new settings in the settings card: the auto-read freshness
+  cutoff (how old a reply may be and still be read on auto, 30 s to 10
+  min) and the pause that ends dictation (1-5 seconds of silence).
 - 24/10 — A conversation switch no longer kills the voice conversation:
   coming back restores the row where it left off (armed, muted, parked)
   and the microphone reopens without a tap.
@@ -148,5 +151,3 @@ picks up the client; the host half needs a web-host restart.
   spoken mid-turn are transcribed and queued.
 - 09/10 — Voice activity trusts the recorder only when the analyser is
   blind (a suspended page), so a quiet room never reads as speech.
-- 08/10 — Replies pipeline sentence by sentence: audio comes out as the
-  text renders, instead of waiting for the whole reply.

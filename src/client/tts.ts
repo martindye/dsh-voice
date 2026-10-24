@@ -7,7 +7,8 @@
  * bridge: a reply is read aloud on this device when (1) the device toggle is
  * on and (2) this device has used the voice composer at least once
  * (dsh.voice-chat.v1, armed by VoiceInput). Freshness is enforced on the
- * host (replies older than two minutes are skipped, not spoken).
+ * host: replies older than the device's freshness window (a setting, 2
+ * minutes by default) are skipped, not spoken.
  */
 import { sentenceBlocks } from '../sentences.ts'
 import { getSharedAudioContext, unlockPageAudio } from './audio-unlock.ts'
@@ -511,6 +512,35 @@ export function setAutoReadScope(scope: AutoReadScope): void {
   emit()
 }
 
+/* ------------------------------------------- how fresh a reply must be */
+
+/**
+ * How old a reply may be for THIS device to read it on auto: the cutoff the
+ * host checks against when declining stale auto-reads. Stored per browser;
+ * never leaves it. The historical window is 2 minutes.
+ */
+const FRESHNESS_KEY = 'dsh-voice-output:read-freshness'
+
+/** The historical window (also the settings default). */
+export const FRESHNESS_DEFAULT_MS = 2 * 60_000
+const FRESHNESS_MIN_MS = 30_000
+const FRESHNESS_MAX_MS = 600_000
+
+export function autoReadFreshnessMs(): number {
+  try {
+    const raw = Number(localStorage.getItem(FRESHNESS_KEY))
+    if (Number.isFinite(raw) && raw > 0) {
+      return Math.min(FRESHNESS_MAX_MS, Math.max(FRESHNESS_MIN_MS, Math.round(raw)))
+    }
+  } catch { /* best effort */ }
+  return FRESHNESS_DEFAULT_MS
+}
+
+export function setAutoReadFreshnessMs(ms: number): void {
+  try { localStorage.setItem(FRESHNESS_KEY, String(Math.round(ms))) } catch { /* best effort */ }
+  emit()
+}
+
 /* ---------------------------------------------------------------- speak */
 
 /** Message ids already considered for auto-read (once per browser per message). */
@@ -550,6 +580,9 @@ export async function speak(
     return { error: lastError }
   }
   const auto = !!opts.auto
+  // The device's auto-read freshness window rides with the request: the host
+  // declines replies older than it. Manual reads are never windowed.
+  const maxAgeMs = auto ? autoReadFreshnessMs() : undefined
   // An auto-read reserves its slot in the serial queue the moment it is
   // triggered — before the plan is even fetched — so two fast replies line
   // up in trigger order no matter how the host orders the plan calls. A
@@ -561,7 +594,7 @@ export async function speak(
   let claimed = false
   const q = { reserved, baseline, claim: () => { claimed = true } }
   try {
-    return await speakWithPlan(sessionId, messageId, opts, q)
+    return await speakWithPlan(sessionId, messageId, { ...opts, maxAgeMs }, q)
   } finally {
     // A slot never handed to a pipeline (stale plan, an error, a stop while
     // the plan was in flight) must be released, or the queue jams.
@@ -572,14 +605,14 @@ export async function speak(
 async function speakWithPlan(
   sessionId: string,
   messageId: string,
-  opts: { auto?: boolean; scope?: 'final' | 'steps' },
+  opts: { auto?: boolean; scope?: 'final' | 'steps'; maxAgeMs?: number },
   q: { reserved: Tail | null; baseline: number; claim: () => void },
 ): Promise<SpeakOutcome> {
   if (typeof ns!.plan === 'function' && typeof ns!.render === 'function' && getSharedAudioContext()) {
     const remote = ns!
     let plan: unknown
     try {
-      plan = await remote.plan({ sessionId, messageId, auto: !!opts.auto, scope: opts.scope ?? 'final' })
+      plan = await remote.plan({ sessionId, messageId, auto: !!opts.auto, scope: opts.scope ?? 'final', maxAgeMs: opts.maxAgeMs })
     } catch (error) {
       lastError = String((error as { message?: unknown })?.message ?? error)
       console.warn('[dsh-voice tts] plan failed:', error)
@@ -626,7 +659,7 @@ async function speakWithPlan(
     return { error: lastError }
   }
   try {
-    const r = (await ns.synthesize({ sessionId, messageId, auto: !!opts.auto, scope: opts.scope ?? 'final' })) as
+    const r = (await ns.synthesize({ sessionId, messageId, auto: !!opts.auto, scope: opts.scope ?? 'final', maxAgeMs: opts.maxAgeMs })) as
       | { ok?: boolean; value?: { audioBase64?: string; stale?: boolean; elapsedMs?: number }; error?: { message?: string; code?: unknown } }
       | { audioBase64?: string; stale?: boolean; elapsedMs?: number }
     const envelope = r && typeof r === 'object' && 'ok' in r ? r : { ok: true, value: r }

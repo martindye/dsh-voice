@@ -369,6 +369,20 @@ interface SynthesizeRequest {
   auto?: boolean
   /** 'steps' speaks the whole turn (intermediate steps + final answer). */
   scope?: 'final' | 'steps'
+  /** The device's auto-read freshness window in ms (the settings card). */
+  maxAgeMs?: number
+}
+
+/**
+ * The auto-read freshness window: the device's per-device choice from the
+ * settings card, validated and clamped. A missing or broken value (older
+ * client, garbage) keeps the historical 2-minute default.
+ */
+function freshWindowMs(requested?: number): number {
+  if (typeof requested === 'number' && Number.isFinite(requested) && requested > 0) {
+    return Math.min(requested, 24 * 60 * 60_000)
+  }
+  return FRESH_WINDOW_MS
 }
 
 class TtsController {
@@ -431,9 +445,10 @@ class TtsController {
     if (prepared.length > TTS_MAX_CHARS) prepared = `${prepared.slice(0, TTS_MAX_CHARS).trimEnd()}...`
 
     if (auto) {
+      const windowMs = freshWindowMs(request?.maxAgeMs)
       const ageMs = Date.now() - time
-      if (time > 0 && ageMs > FRESH_WINDOW_MS) {
-        log(`synthesize stale: age ${Math.round(ageMs / 1000)}s (auto)`)
+      if (time > 0 && ageMs > windowMs) {
+        log(`synthesize stale: age ${Math.round(ageMs / 1000)}s (window ${Math.round(windowMs / 1000)}s)`)
         return { stale: true }
       }
     }
@@ -462,7 +477,7 @@ class TtsController {
    * starves). The freshness check lives here, once, not per sentence.
    */
   async plan(
-    request: { sessionId?: string; messageId?: string; auto?: boolean; scope?: 'final' | 'steps' },
+    request: { sessionId?: string; messageId?: string; auto?: boolean; scope?: 'final' | 'steps'; maxAgeMs?: number },
     signal?: { throwIfAborted?: () => void },
   ): Promise<Record<string, unknown>> {
     signal?.throwIfAborted?.()
@@ -476,9 +491,10 @@ class TtsController {
     if (!prepared) throw new Error('that message has no speakable text')
     if (prepared.length > TTS_MAX_CHARS) prepared = `${prepared.slice(0, TTS_MAX_CHARS).trimEnd()}...`
     if (auto) {
+      const windowMs = freshWindowMs(request?.maxAgeMs)
       const ageMs = Date.now() - time
-      if (time > 0 && ageMs > FRESH_WINDOW_MS) {
-        log(`plan stale: age ${Math.round(ageMs / 1000)}s (auto)`)
+      if (time > 0 && ageMs > windowMs) {
+        log(`plan stale: age ${Math.round(ageMs / 1000)}s (window ${Math.round(windowMs / 1000)}s)`)
         return { stale: true, ageSeconds: Math.round(ageMs / 1000) }
       }
     }

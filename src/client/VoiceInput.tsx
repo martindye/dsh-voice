@@ -9,6 +9,7 @@ import type { SpeechPreparationOptions, SpeechProviderId, SpeechSelection, Speec
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { RecordingError, audioBase64, type Recording } from './audio.ts'
 import { applyDictationFlag } from './dictation-flag.ts'
+import { dictationPauseMs } from './silence-window.ts'
 import { runningChanged, speechStarted, voiceEnded } from './metrics.ts'
 import type { SpeechReadiness } from './readiness.ts'
 import { VoiceSetupDialog } from './VoiceSetupDialog.tsx'
@@ -105,7 +106,6 @@ const VOICE_CHAT_STORAGE_KEY = 'dsh.voice-chat.v1'
 
 /** Voice activity during a voice turn: silence ends the turn, a dead mic gives up. */
 const VOICE_RMS = 0.02
-const SILENCE_MS = 2000
 const NO_SPEECH_MS = 15000
 const VAD_TICK_MS = 250
 /** Peak level over the whole no-speech window: below this, the input
@@ -507,7 +507,9 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
         }
         return
       }
-      if (now - (active.vadLastVoice ?? active.vadHeardAt) >= SILENCE_MS) void finish()
+      // The settings card chooses how long the silence must run; the tick
+      // reads it live, so a change applies from the very next pause.
+      if (now - (active.vadLastVoice ?? active.vadHeardAt) >= dictationPauseMs()) void finish()
     }
     const iv = window.setInterval(tick, VAD_TICK_MS)
     return () => window.clearInterval(iv)
