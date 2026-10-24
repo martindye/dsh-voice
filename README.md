@@ -127,11 +127,26 @@ profile (the web profile links them from the deepseek-harness checkout).
 `pnpm bundle` after pulling when working from a checkout. A page refresh
 picks up the client; the host half needs a web-host restart.
 
-## Retired neighbours
+## Changelog (the 10 latest updates, as of 24/10)
 
-- `DSH_TESTS/dsh-voice-chat` — the read-only kit (STT + TTS) that this
-  plugin replaces wholesale. Keep it as reference only.
-- `DSH_TESTS/dsh-voice-output` — the old output-only plugin; superseded by
-  the speaker buttons in this plugin.
-- The TTSTT coding-voice bridge (retired 10/06) is deliberately not
-  referenced anywhere: auto-read no longer depends on any PC-side process.
+- 24/10 — A conversation switch no longer kills the voice conversation:
+  coming back restores the row where it left off (armed, muted, parked)
+  and the microphone reopens without a tap.
+- 22/10 — A run that opened muted keeps its webm header, so the later
+  unmuted words decode instead of failing with "unable to decode audio".
+- 22/10 — One microphone in the error row: the mute leaves the retry row
+  and appears only where a mic is actually open.
+- 11/10 — One cross, one job: the cross is the single stop control in
+  every phase — it stops the turn, the speech and the words in flight.
+- 11/10 — A dead input device is named when a recording draws no audio
+  ("check the input device"), instead of a generic retry.
+- 11/10 — Auto-reads queue behind audio that is already playing instead
+  of cutting it off; a manual read or an explicit stop still cuts in.
+- 11/10 — Dictated messages can carry a flag (a marker line or a sidecar
+  note) so they are recognisable in the log; typed messages never do.
+- 10/10 — The microphone stays open while the agent thinks, so words
+  spoken mid-turn are transcribed and queued.
+- 09/10 — Voice activity trusts the recorder only when the analyser is
+  blind (a suspended page), so a quiet room never reads as speech.
+- 08/10 — Replies pipeline sentence by sentence: audio comes out as the
+  text renders, instead of waiting for the whole reply.
