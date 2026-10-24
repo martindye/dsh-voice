@@ -126,6 +126,16 @@ function armVoiceChat(): void {
   try { window.localStorage.setItem(VOICE_CHAT_STORAGE_KEY, '1') } catch { /* best effort */ }
 }
 
+/**
+ * The composer row is session-scoped: looking at another conversation
+ * retargets or remounts it, and the component state above dies with it.
+ * Without this registry, returning to a session shows a fresh dictate row
+ * even though the voice conversation is still going on. The registry keeps
+ * each session's armed / mute / parked state across the switch so the row
+ * comes back where it left off and continuous listening reopens the mic.
+ */
+const sessionVoiceState = new Map<SessionId, { armed: boolean, muted: boolean, paused: boolean }>()
+
 /** ChatGPT-style voice glyph: a small audio waveform, shown while a voice turn is starting. */
 function VoiceChatGlyph() {
   return (
@@ -240,6 +250,8 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
   // Continuous listening: once a voice turn completes, the next reply ending
   // reopens the microphone so the conversation continues without a tap.
   const [armed, setArmed] = useState(false)
+  const armedRef = useRef(false)
+  useEffect(() => { armedRef.current = armed }, [armed])
   const turnEndedAt = useRef<number>(), sawSpeech = useRef(false), prevRunning = useRef(running)
   // A sent message whose turn the session has not reported as running yet
   // (still in the submit pipeline, or the status event lags): while it is in
@@ -294,11 +306,21 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     if (active) { clearTimeout(active.timer); active.abort.abort(); void disposeRecording(active.capture) }
     setMessage(''); setPhase('idle'); setSetupOpen(false)
   }
-  useEffect(() => {
+  // A layout effect, so the restore below lands before paint: returning to a
+  // conversation must never flash the fresh dictate row first.
+  useLayoutEffect(() => {
+    // A conversation switch retargets this row and the state above dies with
+    // it; restoring this session's saved voice state keeps the conversation
+    // reading as continuous instead of a fresh dictate + waveform row.
+    const saved = sessionVoiceState.get(sessionId)
     setMessage(''); setPhase('idle'); setSetupOpen(false)
-    setArmed(false); turnEndedAt.current = undefined; sawSpeech.current = false
+    setArmed(Boolean(saved?.armed))
+    mutedRef.current = saved?.muted ?? false
+    setMuted(mutedRef.current)
+    turnEndedAt.current = saved?.armed && !saved.paused && !running ? Date.now() : undefined
+    sawSpeech.current = false
     turnInFlight.current = false
-    paused.current = false; focusPaused.current = false
+    paused.current = saved?.paused ?? false; focusPaused.current = false
     // Focus loss (a notification, screen lock, app switch) pauses a live
     // recording instead of ending it: on a phone the window blurs all the
     // time, and a killed turn flickered the mute button back to the dictate
@@ -333,6 +355,13 @@ export function VoiceInput({ sessionId, inputActions, locked, onActiveChange, us
     document.addEventListener('visibilitychange', visibility)
     document.addEventListener('keydown', escape)
     return () => {
+      // The row is going away (a switch or a close): keep this session's
+      // voice state so the return restores it instead of a fresh row.
+      const state = sessionVoiceState.get(sessionId) ?? { armed: false, muted: false, paused: false }
+      state.armed = armedRef.current
+      state.muted = mutedRef.current
+      state.paused = paused.current
+      sessionVoiceState.set(sessionId, state)
       window.removeEventListener('blur', blur); window.removeEventListener('focus', focus)
       document.removeEventListener('visibilitychange', visibility)
       document.removeEventListener('keydown', escape)

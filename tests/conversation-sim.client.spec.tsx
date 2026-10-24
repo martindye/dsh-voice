@@ -142,6 +142,8 @@ interface Sim {
   focus: () => void
   hide: () => void
   show: () => void
+  /** Look at another conversation: the row retargets and its state dies. */
+  setSession: (id: SessionId) => void
   tapUnified: () => void
   tapMute: () => void
   waitForPrimary: (label: string) => Promise<void>
@@ -205,6 +207,7 @@ function makeSim(): Sim {
     },
     blur: () => fireEvent.blur(window),
     focus: () => fireEvent.focus(window),
+    setSession: (id: SessionId) => { view.rerender(<VoiceInput {...props} sessionId={id} />) },
     hide: () => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); fireEvent(document, new Event('visibilitychange')) },
     show: () => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); fireEvent(document, new Event('visibilitychange')) },
     tapUnified: () => {
@@ -572,3 +575,53 @@ it('watches its own composer when a hidden one sits earlier in the document', as
 
   printTrace(currentTest)
 }, 60000)
+
+it('keeps the voice conversation across a conversation switch (the return is not a fresh dictate row)', async () => {
+  currentTest = 'switch back keeps conversation'
+  const s = makeSim()
+  watch(s.container, 'mount')
+
+  // One full turn arms continuous listening, then the user mutes the mic
+  // (the conversation keeps going; the audio is just discarded).
+  await startTurn(s)
+  await speak(s)
+  await waitSubmitted(s)
+  s.snapshot.running = true; s.rerender()
+  s.snapshot.running = false; s.rerender()
+  await s.waitForPrimary('stopVoiceChat') // the auto-open: the conversation is live
+  watch(s.container, 'conversation live')
+  s.tapMute()
+  watch(s.container, 'muted')
+
+  // The user looks at another conversation: this row retargets.
+  s.setSession('other' as SessionId)
+  watch(s.container, 'switched away')
+  expect(s.container.querySelector('button[aria-label="start"]')).toBeTruthy() // the other chat: a fresh row
+
+  // The return restores THIS conversation, not a new one: no dictate mic,
+  // the mute state came back, and the row is the armed voice entry.
+  s.setSession('sim' as SessionId)
+  watch(s.container, 'back')
+  expect(s.container.querySelector('button[aria-label="start"]')).toBeNull() // no fresh dictate row
+  expect(probe(s.container).mute).toBe('unmuteMic') // the mute survived the switch
+  expect(probe(s.container).unified).toBe('voiceChat.start')
+  expect(container_live(s)).toBe(false) // muted: the mic stays closed
+
+  // Unmute and the conversation continues without a tap: the mic reopens.
+  s.tapMute()
+  watch(s.container, 'unmuted')
+  await s.waitForPrimary('stopVoiceChat')
+  watch(s.container, 'auto-reopened')
+  expect(container_live(s)).toBe(true)
+
+  printTrace(currentTest)
+  // One live session each side of the switch: the tap-open (which stayed
+  // live through the mute and died with the switch), and the auto-open that
+  // follows the return. A muted microphone never starts a new session.
+  expect(recordingSessions()).toBe(2)
+}, 60000)
+
+/** The live-microphone row, regardless of what the button shows. */
+function container_live(s: { container: HTMLElement }): boolean {
+  return s.container.querySelector('[data-voice-live="1"]') !== null
+}
